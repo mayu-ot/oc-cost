@@ -5,8 +5,6 @@ import json
 import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
-import pdb
 import click
 
 MODEL_CFGS = {
@@ -41,11 +39,15 @@ def stylize_bars(bars, ax, txt_color="w"):
 
 
 @cli.command()
+@click.argument(
+    "out_dir", type=click.Path(exists=True, file_okay=False, dir_okay=True)
+)
+@click.option("--ncols", type=int, default=3)
 def generate_reports(
-    metrics=["bbox_mAP", "bbox_mAP_50", "bbox_mAP_75", "mOTC"]
+    out_dir, ncols, metrics=["bbox_mAP", "bbox_mAP_50", "bbox_mAP_75", "mOTC"]
 ):
     sns.set_style("white")
-    work_dir = "outputs/otc_eval/"
+    work_dir = out_dir
     results = []
     for fn in os.listdir(work_dir):
         if os.path.splitext(fn)[-1] == ".json":
@@ -61,13 +63,13 @@ def generate_reports(
     data["model"] = models
 
     for metric in metrics:
-        if metric == "mOTC":
-            vals = [1 - res["metric"][metric] for res in results]
-        else:
-            vals = [res["metric"][metric] for res in results]
+        vals = [res["metric"][metric] for res in results]
         data[metric] = vals
 
-    f, axes = plt.subplots(len(metrics), 1, figsize=(4, 4 * len(metrics)))
+    nrows = len(metrics) // ncols + 1
+    f, axes = plt.subplots(nrows, ncols, figsize=(4 * ncols, 4 * nrows))
+    axes = axes.ravel()
+
     for i, metric in enumerate(metrics):
 
         bars = axes[i].bar(
@@ -79,16 +81,24 @@ def generate_reports(
         axes[i].set_title(metric)
         stylize_bars(bars, axes[i], "k")
 
-    axes[i].set_xticks(np.arange(len(models)))
-    axes[i].set_xticklabels(models, rotation=45)
+        axes[i].set_xticks(np.arange(len(models)))
+        axes[i].set_xticklabels(models, rotation=45)
 
-    f.savefig("outputs/otc_eval/metric.pdf", bbox_inches="tight")
+    f.savefig(os.path.join(work_dir, "metric.pdf"), bbox_inches="tight")
 
 
 @cli.command()
-def evaluate():
+@click.argument("dataset")
+@click.argument("out_dir", type=click.Path(file_okay=False, dir_okay=True))
+def evaluate(dataset, out_dir):
+
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
+
     model_infos = get_model_info("mmdet")
+
     for model_cfg in MODEL_CFGS.keys():
+
         if not os.path.exists(
             os.path.join(DEFAULT_CACHE_DIR, model_cfg + ".py")
         ):
@@ -107,10 +117,10 @@ def evaluate():
                 "--eval",
                 "bbox",
                 "--work-dir",
-                "outputs/otc_eval/",
+                f"{out_dir}",
                 "--cfg-options",
-                "data.test.type=CocoCustomDataset",
-                "data.test.ann_file=data/coco/annotations/instances_val2017_subset.json", # to run evaluation on a small subset
+                f"data.test.type={dataset}",
+                # "data.test.ann_file=data/coco/annotations/instances_val2017_subset.json",  # to run evaluation on a small subset
                 "custom_imports.imports=[src.extensions.dataset.coco_custom]",
                 "custom_imports.allow_failed_imports=False",
             ),
