@@ -84,15 +84,19 @@ def add_label(result):
     return np.hstack([np.vstack(result), labels[:, None]])
 
 
-def get_distmap(a_result, b_result):
+def get_distmap(a_result, b_result, mode="giou"):
     a_result = add_label(a_result)
     b_result = add_label(b_result)
     n = len(a_result)
     m = len(b_result)
 
-    dist_iou = 1 - get_bbox_overlaps(
-        a_result[:, :4], b_result[:, :4], mode="giou"
-    )
+    dist_iou = get_bbox_overlaps(a_result[:, :4], b_result[:, :4], mode=mode)
+    if mode == "giou":  # giou range [-1, 1] -> [0, 1]
+        dist_iou += 1
+        dist_iou *= 0.5
+
+    dist_iou = 1 - dist_iou
+
     dist_cls = np.zeros((n, m))
 
     for i in range(n):
