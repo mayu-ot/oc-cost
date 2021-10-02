@@ -2,7 +2,11 @@ from dataclasses import dataclass
 from mmdet.datasets.coco import CocoDataset
 from mmdet.datasets.builder import DATASETS
 import numpy as np
-from src.extensions.metrics.ot_cost import get_ot_cost
+from src.extensions.metrics.ot_cost import (
+    get_ot_cost,
+    get_distmap,
+    get_distmap_bg,
+)
 from copy import deepcopy
 import pdb
 import json
@@ -21,7 +25,8 @@ def write2json(ot_costs, file_names):
 
 
 def eval_ot_costs(gts, results):
-    return [get_ot_cost(x, y) for x, y in zip(gts, results)]
+    cmap_func = lambda x, y: get_distmap_bg(x, y, mode="giou")
+    return [get_ot_cost(x, y, cmap_func) for x, y in zip(gts, results)]
 
 
 @DATASETS.register_module()
@@ -80,7 +85,7 @@ class CocoOtcDataset(CocoDataset):
         gts = self.get_gts()
         ot_costs = eval_ot_costs(gts, results)
         file_names = [x["img_metas"][0].data["ori_filename"] for x in self]
-        # write2json(ot_costs, file_names)
+        write2json(ot_costs, file_names)
         mean_ot_costs = np.mean(ot_costs)
         return mean_ot_costs
 

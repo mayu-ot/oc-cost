@@ -91,6 +91,7 @@ def get_distmap(a_result, b_result, mode="giou"):
     m = len(b_result)
 
     dist_iou = get_bbox_overlaps(a_result[:, :4], b_result[:, :4], mode=mode)
+
     if mode == "giou":  # giou range [-1, 1] -> [0, 1]
         dist_iou += 1
         dist_iou *= 0.5
@@ -104,20 +105,75 @@ def get_distmap(a_result, b_result, mode="giou"):
             if a_result[i, -1] == b_result[j, -1]:
                 dist_cls[i, j] = a_result[i, -2] - b_result[j, -2]
             else:
-                dist_cls[i, j] = 1
+                dist_cls[i, j] = a_result[i, -2] + b_result[j, -2]
 
-    dist_cls = np.abs(dist_cls)
+    dist_cls = np.abs(dist_cls * 0.5)
 
-    return (dist_iou + dist_cls) * 0.5
+    dist_a = np.ones(n) / n
+    dist_b = np.ones(m) / m
+    return dist_a, dist_b, (dist_iou + dist_cls) * 0.5
 
 
-def get_ot_cost(a_detection, b_detection, return_matrix=False):
+def get_distmap_bg(a_result, b_result, mode="giou"):
+    """[summary]
+
+    Args:
+        a_result ([type]): ground truth bounding boxes.
+        b_result ([type]): predictions
+        mode (str, optional): [description]. Defaults to "giou".
+
+    Returns:
+        dist_a (np.array): (N+1,) array. distribution over ground truth bounding boxes.
+        dist_b (np.array): (M,) array. distribution over predictions.
+        cost_map:
+    """
+    a_result = add_label(a_result)
+    b_result = add_label(b_result)
+    n = len(a_result)
+    m = len(b_result)
+    r = m - n
+
+    cost_map = np.zeros((n + 1, m))
+
+    dist_iou = get_bbox_overlaps(a_result[:, :4], b_result[:, :4], mode=mode)
+
+    if mode == "giou":  # giou range [-1, 1] -> [0, 1]
+        dist_iou += 1
+        dist_iou *= 0.5
+
+    dist_iou = 1 - dist_iou
+    cost_map[:n, :m] = dist_iou * 0.5
+
+    dist_cls = np.zeros((n + 1, m))
+
+    for i in range(n):
+        for j in range(m):
+            if a_result[i, -1] == b_result[j, -1]:
+                dist_cls[i, j] = a_result[i, -2] - b_result[j, -2]
+            else:
+                dist_cls[i, j] = a_result[i, -2] + b_result[j, -2]
+    dist_cls[-1, :] = [1 + b[-2] for b in b_result]
+
+    dist_cls = np.abs(dist_cls * 0.5)
+    cost_map += dist_cls * 0.5
+
+    dist_a = np.ones(n + 1)
+    dist_a[-1] = max(r, 0)
+    dist_a /= dist_a.sum()
+
+    dist_b = np.ones(m) / m
+
+    return dist_a, dist_b, cost_map
+
+
+def get_ot_cost(a_detection, b_detection, cmap_func, return_matrix=False):
     """[summary]
 
     Args:
         a_detection (list): list of detection results. a_detection[i] contains bounding boxes for i-th class.
         Each element is numpy array whose shape is N x 5. [[x1, y1, x2, y2, s], ...]
         b_detection (list): ditto
+        cmap_func (callable): a function that takes a_detection and b_detection as input and returns a unit cost matrix
     Returns:
         [float]: optimal transportation cost
     """
@@ -128,9 +184,6 @@ def get_ot_cost(a_detection, b_detection, return_matrix=False):
     if is_a_none or is_b_none:
         return 1  #
 
-    M = get_distmap(a_detection, b_detection)
-    n, m = M.shape
+    a, b, M = cmap_func(a_detection, b_detection)
 
-    return ot.emd2(
-        np.ones(n) / n, np.ones(m) / m, M, return_matrix=return_matrix
-    )
+    return ot.emd2(a, b, M, return_matrix=return_matrix)

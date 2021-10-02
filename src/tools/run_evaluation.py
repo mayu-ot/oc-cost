@@ -6,6 +6,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 import click
+import time
 
 MODEL_CFGS = {
     "retinanet_r50_fpn_2x_coco": "RetinaNet",
@@ -91,6 +92,8 @@ def generate_reports(
 @click.argument("dataset")
 @click.argument("out_dir", type=click.Path(file_okay=False, dir_okay=True))
 def evaluate(dataset, out_dir):
+    timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+    out_dir = os.path.join(out_dir, timestamp)
 
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)

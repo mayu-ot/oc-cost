@@ -10,11 +10,11 @@ import pdb
 import click
 
 MODEL_CFGS = {
-    # "retinanet_x101_64x4d_fpn_2x_coco": "RetinaNet",
-    "faster_rcnn_x101_64x4d_fpn_mstrain_3x_coco": "Faster-RCNN",
+    # "retinanet_r50_fpn_2x_coco": "RetinaNet",
+    "faster_rcnn_r50_fpn_2x_coco": "Faster-RCNN",
     # "yolof_r50_c5_8x8_1x_coco": "YOLOF",
     # "detr_r50_8x2_150e_coco": "DETR",
-    "vfnet_x101_64x4d_fpn_mdconv_c3-c5_mstrain_2x_coco": "VFNet",
+    # "vfnet_r50_fpn_mstrain_2x_coco": "VFNet",
 }
 
 
@@ -45,7 +45,7 @@ def run_test():
                 "--out",
                 f"tmp/{model_name}.pkl",
                 "--cfg-options",
-                "data.test.type=CocoCustomDataset",
+                "data.test.type=CocoOtcDataset",
                 "data.test.ann_file=data/coco/annotations/instances_val2017_subset.json",
                 "custom_imports.imports=[src.extensions.dataset.coco_custom]",
                 "custom_imports.allow_failed_imports=False",
