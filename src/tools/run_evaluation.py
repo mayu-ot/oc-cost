@@ -2,11 +2,13 @@ from mim import test, download, get_model_info
 from mim.utils import DEFAULT_CACHE_DIR
 import os
 import json
+from mmdet.utils.logger import get_root_logger
 import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 import click
 import time
+import logging
 
 MODEL_CFGS = {
     "retinanet_r50_fpn_2x_coco": "RetinaNet",
@@ -43,14 +45,16 @@ def stylize_bars(bars, ax, txt_color="w"):
 @click.argument(
     "out_dir", type=click.Path(exists=True, file_okay=False, dir_okay=True)
 )
-@click.option("--ncols", type=int, default=3)
+@click.option("--ncols", type=int, default=4)
 def generate_reports(
     out_dir, ncols, metrics=["bbox_mAP", "bbox_mAP_50", "bbox_mAP_75", "mOTC"]
 ):
     sns.set_style("white")
     work_dir = out_dir
     results = []
-    for fn in os.listdir(work_dir):
+    files = os.listdir(work_dir)
+    files.sort()
+    for fn in files:
         if os.path.splitext(fn)[-1] == ".json":
             res = json.load(open(os.path.join(work_dir, fn)))
             results.append(res)
@@ -67,12 +71,11 @@ def generate_reports(
         vals = [res["metric"][metric] for res in results]
         data[metric] = vals
 
-    nrows = len(metrics) // ncols + 1
+    nrows = len(metrics) // ncols
     f, axes = plt.subplots(nrows, ncols, figsize=(4 * ncols, 4 * nrows))
     axes = axes.ravel()
 
     for i, metric in enumerate(metrics):
-
         bars = axes[i].bar(
             np.arange(len(models)),
             data[metric],
@@ -91,12 +94,19 @@ def generate_reports(
 @cli.command()
 @click.argument("dataset")
 @click.argument("out_dir", type=click.Path(file_okay=False, dir_okay=True))
-def evaluate(dataset, out_dir):
+@click.option("--hparam-dir", type=click.Path(file_okay=False, dir_okay=True))
+def evaluate(dataset, out_dir, hparam_dir):
     timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
     out_dir = os.path.join(out_dir, timestamp)
 
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
+
+    log_file = os.path.join(out_dir, "run_evaluation.log")
+    logger = get_root_logger(log_file)
+    logger.info(f"dataset={dataset}")
+    logger.info(f"dataset={out_dir}")
+    logger.info(f"dataset={hparam_dir}")
 
     model_infos = get_model_info("mmdet")
 
@@ -110,11 +120,27 @@ def evaluate(dataset, out_dir):
         model_info = model_infos.loc[model_cfg]
         checkpoint_name = os.path.basename(model_info.weight)
 
+        # test hyperparameters
+        print(hparam_dir)
+        hparam_options = ()
+        if hparam_dir is not None:
+            hparams = json.load(
+                open(
+                    f"data/processed/tune_hparams_otc/{MODEL_CFGS[model_cfg]}_tune_res.json"
+                )
+            )
+            score_thr = hparams["best_params"]["score_thr"]
+            iou_threshold = hparams["best_params"]["iou_threshold"]
+            hparam_options = (
+                f"model.test_cfg.score_thr={score_thr}",
+                f"model.test_cfg.nms.iou_threshold={iou_threshold}",
+            )
+
         _ = test(
             package="mmdet",
             config=os.path.join(DEFAULT_CACHE_DIR, model_cfg + ".py"),
             checkpoint=os.path.join(DEFAULT_CACHE_DIR, checkpoint_name),
-            gpus=4,
+            gpus=2,
             launcher="pytorch",
             other_args=(
                 "--eval",
@@ -126,6 +152,7 @@ def evaluate(dataset, out_dir):
                 # "data.test.ann_file=data/coco/annotations/instances_val2017_subset.json",  # to run evaluation on a small subset
                 "custom_imports.imports=[src.extensions.dataset.coco_custom]",
                 "custom_imports.allow_failed_imports=False",
+                *hparam_options,
             ),
         )
 

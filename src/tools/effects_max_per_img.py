@@ -6,6 +6,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 import click
+import time
 
 MODEL_CFGS = {
     # "retinanet_r50_fpn_2x_coco": "RetinaNet",
@@ -42,7 +43,7 @@ def stylize_bars(bars, ax, txt_color="w"):
 @click.argument(
     "out_dir", type=click.Path(exists=True, file_okay=False, dir_okay=True)
 )
-@click.option("--ncols", type=int, default=3)
+@click.option("--ncols", type=int, default=4)
 def generate_reports(
     out_dir, ncols, metrics=["bbox_mAP", "bbox_mAP_50", "bbox_mAP_75", "mOTC"]
 ):
@@ -60,7 +61,7 @@ def generate_reports(
             for k, v in res["metric"].items():
                 results.setdefault(k, []).append(v)
 
-    nrows = len(metrics) // ncols + 1
+    nrows = len(metrics) // ncols
     f, axes = plt.subplots(nrows, ncols, figsize=(4 * ncols, 4 * nrows))
     axes = axes.ravel()
 
@@ -84,6 +85,8 @@ def generate_reports(
 @click.argument("dataset")
 @click.argument("out_dir", type=click.Path(file_okay=False, dir_okay=True))
 def evaluate(dataset, out_dir):
+    timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+    out_dir = os.path.join(out_dir, timestamp)
 
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
@@ -105,7 +108,7 @@ def evaluate(dataset, out_dir):
                 package="mmdet",
                 config=os.path.join(DEFAULT_CACHE_DIR, model_cfg + ".py"),
                 checkpoint=os.path.join(DEFAULT_CACHE_DIR, checkpoint_name),
-                gpus=4,
+                gpus=2,
                 launcher="pytorch",
                 other_args=(
                     "--eval",
@@ -114,6 +117,7 @@ def evaluate(dataset, out_dir):
                     f"{out_dir}",
                     "--cfg-options",
                     f"data.test.type={dataset}",
+                    # "data.test.ann_file=data/coco/annotations/instances_val2017_subset.json",  # to run evaluation on a small subset
                     f"model.test_cfg.max_per_img={m}",
                     "custom_imports.imports=[src.extensions.dataset.coco_custom]",
                     "custom_imports.allow_failed_imports=False",
