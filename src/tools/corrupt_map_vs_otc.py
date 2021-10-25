@@ -6,6 +6,8 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 import click
+import time
+from mmdet.utils.logger import get_root_logger
 
 MODEL_CFGS = {
     "retinanet_r50_fpn_2x_coco": "RetinaNet",
@@ -39,7 +41,7 @@ def stylize_bars(bars, ax, txt_color="w"):
 @click.argument(
     "out_dir", type=click.Path(exists=True, file_okay=False, dir_okay=True)
 )
-@click.option("--ncols", type=int, default=3)
+@click.option("--ncols", type=int, default=4)
 def generate_reports(
     out_dir, ncols, metrics=["bbox_mAP", "bbox_mAP_50", "bbox_mAP_75", "mOTC"]
 ):
@@ -92,15 +94,19 @@ def generate_reports(
 @click.argument("dataset")
 @click.argument("out_dir", type=click.Path(file_okay=False, dir_okay=True))
 def evaluate(dataset, out_dir):
+    timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+    out_dir = os.path.join(out_dir, timestamp)
+    log_file = os.path.join(out_dir, "corrupt_map_vs_otc.log")
+    logger = get_root_logger(log_file)
+    logger.info(f"dataset={dataset}")
+    logger.info(f"dataset={out_dir}")
 
-    for data_type in ["corrupt", "org"]:
+    for data_type in ["GaussNoise", "ImageCompression", "org"]:
         out_sub_dir = os.path.join(out_dir, data_type)
         if data_type == "org":
             img_dir = "data/coco/val2017/"
-        elif data_type == "corrupt":
-            img_dir = "data/processed/coco-corrupted/val2017/"
         else:
-            raise RuntimeError
+            img_dir = f"data/processed/coco-corrupted/val2017/{data_type}/"
 
         if not os.path.exists(out_sub_dir):
             os.makedirs(out_sub_dir)
@@ -117,11 +123,20 @@ def evaluate(dataset, out_dir):
             model_info = model_infos.loc[model_cfg]
             checkpoint_name = os.path.basename(model_info.weight)
 
+            # test hyperparameters
+            hparams = json.load(
+                open(
+                    f"data/processed/tune_hparams_otc/{MODEL_CFGS[model_cfg]}_tune_res.json"
+                )
+            )
+            score_thr = hparams["best_params"]["score_thr"]
+            iou_threshold = hparams["best_params"]["iou_threshold"]
+
             _ = test(
                 package="mmdet",
                 config=os.path.join(DEFAULT_CACHE_DIR, model_cfg + ".py"),
                 checkpoint=os.path.join(DEFAULT_CACHE_DIR, checkpoint_name),
-                gpus=4,
+                gpus=2,
                 launcher="pytorch",
                 other_args=(
                     "--eval",
@@ -131,9 +146,11 @@ def evaluate(dataset, out_dir):
                     "--cfg-options",
                     f"data.test.type={dataset}",
                     f"data.test.img_prefix={img_dir}",
-                    "data.test.ann_file=data/coco/annotations/instances_val2017_subset.json",  # to run evaluation on a small subset
+                    "data.test.ann_file=data/coco/annotations/instances_val2017.json",  # to run evaluation on a small subset
                     "custom_imports.imports=[src.extensions.dataset.coco_custom]",
                     "custom_imports.allow_failed_imports=False",
+                    f"model.test_cfg.score_thr={score_thr}",
+                    f"model.test_cfg.nms.iou_threshold={iou_threshold}",
                 ),
             )
 
