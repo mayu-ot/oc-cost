@@ -84,37 +84,21 @@ def add_label(result):
     return np.hstack([np.vstack(result), labels[:, None]])
 
 
-def get_distmap(a_result, b_result, mode="giou"):
-    a_result = add_label(a_result)
-    b_result = add_label(b_result)
-    n = len(a_result)
-    m = len(b_result)
+def cost_func(x, y, mode: str = "giou", alpha: float = 0.8):
+    loc_cost = (
+        1 - get_bbox_overlaps(x[:4][None, :], y[:4][None, :], mode)
+    ) * 0.5  # normalized to [0, 1]
+    l_x, l_y = x[-1], y[-1]
+    if l_x == l_y:
+        cls_cost = np.abs(x[-2] - y[-2])
+    else:
+        cls_cost = x[-2] + y[-2]
+    cls_cost *= 0.5  # normalized to [0, 1]
 
-    dist_iou = get_bbox_overlaps(a_result[:, :4], b_result[:, :4], mode=mode)
-
-    if mode == "giou":  # giou range [-1, 1] -> [0, 1]
-        dist_iou += 1
-        dist_iou *= 0.5
-
-    dist_iou = 1 - dist_iou
-
-    dist_cls = np.zeros((n, m))
-
-    for i in range(n):
-        for j in range(m):
-            if a_result[i, -1] == b_result[j, -1]:
-                dist_cls[i, j] = a_result[i, -2] - b_result[j, -2]
-            else:
-                dist_cls[i, j] = a_result[i, -2] + b_result[j, -2]
-
-    dist_cls = np.abs(dist_cls * 0.5)
-
-    dist_a = np.ones(n) / n
-    dist_b = np.ones(m) / m
-    return dist_a, dist_b, (dist_iou + dist_cls) * 0.5
+    return alpha * loc_cost + (1 - alpha) * cls_cost
 
 
-def get_distmap_bg(a_result, b_result, mode="giou"):
+def get_cmap(a_result, b_result, beta=0.4, mode="giou", use_dummy=True):
     """[summary]
 
     Args:
@@ -131,39 +115,33 @@ def get_distmap_bg(a_result, b_result, mode="giou"):
     b_result = add_label(b_result)
     n = len(a_result)
     m = len(b_result)
-    r = m - n
 
-    cost_map = np.zeros((n + 1, m))
+    cost_map = np.zeros((n + int(use_dummy), m + int(use_dummy)))
 
-    dist_iou = get_bbox_overlaps(a_result[:, :4], b_result[:, :4], mode=mode)
+    metric = lambda x, y: cost_func(x, y, mode=mode)
+    cost_map[:n, :m] = ot.utils.dist(a_result, b_result, metric)
 
-    if mode == "giou":  # giou range [-1, 1] -> [0, 1]
-        dist_iou += 1
-        dist_iou *= 0.5
+    dist_a = np.ones(n + int(use_dummy))
+    dist_b = np.ones(m + int(use_dummy))
 
-    dist_iou = 1 - dist_iou
-    cost_map[:n, :m] = dist_iou * 0.5
+    # cost for dummy demander / supplier
+    if use_dummy:
+        cost_map[-1, :] = beta
+        cost_map[:, -1] = beta
+        dist_a[-1] = m
+        dist_b[-1] = n
 
-    dist_cls = np.zeros((n + 1, m))
-
-    for i in range(n):
-        for j in range(m):
-            if a_result[i, -1] == b_result[j, -1]:
-                dist_cls[i, j] = a_result[i, -2] - b_result[j, -2]
-            else:
-                dist_cls[i, j] = a_result[i, -2] + b_result[j, -2]
-    dist_cls[-1, :] = [1 + b[-2] for b in b_result]
-
-    dist_cls = np.abs(dist_cls * 0.5)
-    cost_map += dist_cls * 0.5
-
-    dist_a = np.ones(n + 1)
-    dist_a[-1] = max(r, 0)
     dist_a /= dist_a.sum()
-
-    dist_b = np.ones(m) / m
+    dist_b /= dist_b.sum()
 
     return dist_a, dist_b, cost_map
+
+
+def subtract_dummy2dummy_cost(M, outputs):
+    if len(outputs) == 2:
+        total_cost, log = outputs
+    G = log["G"]
+    return total_cost - M[-1, -1] * G[-1, -1]
 
 
 def get_ot_cost(a_detection, b_detection, cmap_func, return_matrix=False):
@@ -179,11 +157,21 @@ def get_ot_cost(a_detection, b_detection, cmap_func, return_matrix=False):
     """
     is_a_none = a_detection is None
     is_b_none = b_detection is None
+
+    if not is_a_none:
+        if sum([len(x) for x in a_detection]) == 0:
+            is_a_none = True
+
+    if not is_b_none:
+        if sum([len(x) for x in b_detection]) == 0:
+            is_b_none = True
+
     if is_a_none and is_b_none:
         return 0  # no object is detected in both results
     if is_a_none or is_b_none:
         return 1  #
 
     a, b, M = cmap_func(a_detection, b_detection)
+    outputs = ot.emd2(a, b, M, return_matrix=return_matrix)
 
-    return ot.emd2(a, b, M, return_matrix=return_matrix)
+    return outputs

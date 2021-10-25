@@ -12,9 +12,43 @@ import pdb
 import json
 import time
 import os.path as osp
+from mmcv.utils import get_logger
+import matplotlib.pyplot as plt
 
 N_COCOCLASSES = 80
 print("imported!")
+
+
+def get_stats(ot_costs, gts, results, logger):
+    mean = np.mean(ot_costs)
+    std = np.std(ot_costs)
+    n_gts = [len(np.vstack(x)) for x in gts]
+    n_preds = [len(np.vstack(x)) for x in results]
+    cov_gts = np.cov(ot_costs, n_gts)[0, 1]
+    cov_preds = np.cov(ot_costs, n_preds)[0, 1]
+    _, axes = plt.subplots(1, 2)
+    axes[0].scatter(n_gts, ot_costs)
+    axes[0].set_title("otc vs # GTs")
+    axes[1].scatter(n_preds, ot_costs)
+    axes[1].set_title("otc vs # Preds")
+
+    plt.savefig(
+        osp.join("tmp", "otc_n_bbox.pdf"),
+        bbox_inches="tight",
+    )
+
+    if logger is not None:
+        logger.info(f"mean OTC {mean:.4}")
+        logger.info(f"std OTC {std:.4}")
+        logger.info(f"covariance with # GTs {cov_gts:.4}")
+        logger.info(f"covariance with # GTs {cov_preds:.4}")
+
+    return {
+        "mean": mean,
+        "std": std,
+        "cov_gts": cov_gts,
+        "cov_preds": cov_preds,
+    }
 
 
 def write2json(ot_costs, file_names):
@@ -24,8 +58,23 @@ def write2json(ot_costs, file_names):
     json.dump(data, open(json_file, "w"))
 
 
-def eval_ot_costs(gts, results):
-    cmap_func = lambda x, y: get_distmap_bg(x, y, mode="giou")
+def eval_ot_costs(gts, results, cmap_func):
+    # costs = []
+    # progress = tqdm(total=len(results))
+
+    # with ProcessPoolExecutor(8) as pool:
+    #     futures = []
+
+    #     for x, y in zip(gts, results):
+    #         future = pool.submit(get_ot_cost, x, y, cmap_func)
+    #         futures.append(future)
+
+    #     for future in as_completed(futures):
+    #         progress.update(1)
+    #         costs.append(future.result())
+
+    # return costs
+
     return [get_ot_cost(x, y, cmap_func) for x, y in zip(gts, results)]
 
 
@@ -41,6 +90,7 @@ class CocoOtcDataset(CocoDataset):
         proposal_nums=(100, 300, 1000),
         iou_thrs=None,
         metric_items=None,
+        eval_map=True,
     ):
         """Evaluate predicted bboxes. Override this method for your measure.
 
@@ -57,19 +107,23 @@ class CocoOtcDataset(CocoDataset):
         Returns:
             dict[str, float]: {metric_name: metric_value}
         """
+        if eval_map:
+            eval_results = super().evaluate(
+                results,
+                metric=metric,
+                logger=logger,
+                jsonfile_prefix=jsonfile_prefix,
+                classwise=classwise,
+                proposal_nums=proposal_nums,
+                iou_thrs=iou_thrs,
+                metric_items=metric_items,
+            )
+        else:
+            eval_results = {}
 
         mean_otc = self.eval_OTC(results, logger=logger)
-        eval_results = super().evaluate(
-            results,
-            metric=metric,
-            logger=logger,
-            jsonfile_prefix=jsonfile_prefix,
-            classwise=classwise,
-            proposal_nums=proposal_nums,
-            iou_thrs=iou_thrs,
-            metric_items=metric_items,
-        )
         eval_results["mOTC"] = mean_otc
+
         return eval_results
 
     def get_gts(self):
@@ -83,10 +137,12 @@ class CocoOtcDataset(CocoDataset):
 
     def eval_OTC(self, results, logger=None):
         gts = self.get_gts()
-        ot_costs = eval_ot_costs(gts, results)
-        file_names = [x["img_metas"][0].data["ori_filename"] for x in self]
-        write2json(ot_costs, file_names)
+        cmap_func = lambda x, y: get_distmap(x, y, mode="giou")
+        ot_costs = eval_ot_costs(gts, results, cmap_func)
+        # file_names = [x["img_metas"][0].data["ori_filename"] for x in self]
+        # write2json(ot_costs, file_names)
         mean_ot_costs = np.mean(ot_costs)
+        # otc_stats = get_stats(ot_costs, gts, results, logger)
         return mean_ot_costs
 
     def evaluate_gt(
@@ -153,3 +209,13 @@ class CocoOtcDataset(CocoDataset):
                     np.asarray([], dtype=np.float32).reshape(0, 5)
                 )
         return np_bboxes
+
+
+@DATASETS.register_module()
+class CocoOtcDatasetV2(CocoOtcDataset):
+    def eval_OTC(self, results, logger=None):
+        gts = self.get_gts()
+        cmap_func = lambda x, y: get_distmap_bg(x, y, mode="giou")
+        ot_costs = eval_ot_costs(gts, results, cmap_func)
+        mean_ot_costs = np.mean(ot_costs)
+        return mean_ot_costs
