@@ -2,20 +2,18 @@ from mim import test, download, get_model_info
 from mim.utils import DEFAULT_CACHE_DIR
 import os
 import json
-import seaborn as sns
-import matplotlib.pyplot as plt
-import numpy as np
 import click
 import time
 import glob
 import optuna
-import pdb
+import neptune.new as neptune
+import neptune.new.integrations.optuna as optuna_utils
 
 MODEL_CFGS = {
     # "retinanet_r50_fpn_2x_coco": "RetinaNet",
     # "faster_rcnn_r50_fpn_2x_coco": "Faster-RCNN",
-    "yolof_r50_c5_8x8_1x_coco": "YOLOF",
-    "detr_r50_8x2_150e_coco": "DETR",
+    # "yolof_r50_c5_8x8_1x_coco": "YOLOF",
+    # "detr_r50_8x2_150e_coco": "DETR",
     "vfnet_r50_fpn_mstrain_2x_coco": "VFNet",
 }
 
@@ -38,6 +36,12 @@ def hptune(dataset, out_dir):
     model_infos = get_model_info("mmdet")
 
     for model_cfg in MODEL_CFGS.keys():
+        run = neptune.init(
+            project=os.environ["NEPTUNE_PROJECT"],
+            name="tune_hparams",
+            tags=["optuna", "hptune", MODEL_CFGS[model_cfg]],
+        )
+        neptune_callback = optuna_utils.NeptuneCallback(run)
 
         if not os.path.exists(
             os.path.join(DEFAULT_CACHE_DIR, model_cfg + ".py")
@@ -48,9 +52,9 @@ def hptune(dataset, out_dir):
         checkpoint_name = os.path.basename(model_info.weight)
 
         def objective(trial):
-            score_thr = trial.suggest_float("score_thr", 0.01, 0.5, log=False)
+            score_thr = trial.suggest_float("score_thr", 0.01, 0.9, log=False)
             iou_threshold = trial.suggest_float(
-                "iou_threshold", 0.4, 0.9, log=False
+                "iou_threshold", 0.1, 0.9, log=False
             )
 
             is_success, _ = test(
@@ -89,23 +93,12 @@ def hptune(dataset, out_dir):
             return cost
 
         study = optuna.create_study(
-            study_name=f"{MODEL_CFGS[model_cfg]}", direction="minimize"
+            study_name=f"{MODEL_CFGS[model_cfg]}",
+            direction="minimize",
         )  # Create a new study.
-        study.optimize(objective, n_trials=15)
+        study.optimize(objective, n_trials=30, callbacks=[neptune_callback])
 
-        tune_res = {
-            "best_params": study.best_params,
-            "best_value": study.best_value,
-        }
-        json.dump(
-            tune_res,
-            open(
-                os.path.join(
-                    out_dir, f"{MODEL_CFGS[model_cfg]}_tune_res.json"
-                ),
-                "w",
-            ),
-        )
+        run.stop()
 
 
 if __name__ == "__main__":

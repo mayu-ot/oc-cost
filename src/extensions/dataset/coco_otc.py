@@ -2,11 +2,7 @@ from dataclasses import dataclass
 from mmdet.datasets.coco import CocoDataset
 from mmdet.datasets.builder import DATASETS
 import numpy as np
-from src.extensions.metrics.ot_cost import (
-    get_ot_cost,
-    get_distmap,
-    get_distmap_bg,
-)
+from src.extensions.metrics.ot_cost import get_ot_cost, get_cmap
 from copy import deepcopy
 import pdb
 import json
@@ -14,28 +10,20 @@ import time
 import os.path as osp
 from mmcv.utils import get_logger
 import matplotlib.pyplot as plt
+import neptune.new as neptune
+from neptune.new.types import File
+from mmcv.runner.dist_utils import master_only
 
 N_COCOCLASSES = 80
-print("imported!")
 
 
-def get_stats(ot_costs, gts, results, logger):
+def get_stats(ot_costs, gts, results, logger=None):
     mean = np.mean(ot_costs)
     std = np.std(ot_costs)
     n_gts = [len(np.vstack(x)) for x in gts]
     n_preds = [len(np.vstack(x)) for x in results]
     cov_gts = np.cov(ot_costs, n_gts)[0, 1]
     cov_preds = np.cov(ot_costs, n_preds)[0, 1]
-    _, axes = plt.subplots(1, 2)
-    axes[0].scatter(n_gts, ot_costs)
-    axes[0].set_title("otc vs # GTs")
-    axes[1].scatter(n_preds, ot_costs)
-    axes[1].set_title("otc vs # Preds")
-
-    plt.savefig(
-        osp.join("tmp", "otc_n_bbox.pdf"),
-        bbox_inches="tight",
-    )
 
     if logger is not None:
         logger.info(f"mean OTC {mean:.4}")
@@ -46,9 +34,36 @@ def get_stats(ot_costs, gts, results, logger):
     return {
         "mean": mean,
         "std": std,
-        "cov_gts": cov_gts,
-        "cov_preds": cov_preds,
+        "cov_n-gts": cov_gts,
+        "cov_n-preds": cov_preds,
     }
+
+
+def draw_stats(ot_costs, gts, results):
+    n_gts = [len(np.vstack(x)) for x in gts]
+    n_preds = [len(np.vstack(x)) for x in results]
+    figures = {}
+
+    fig, axes = plt.subplots(1, 2)
+    axes[0].scatter(n_gts, ot_costs)
+    axes[0].set_title("otc vs # GTs")
+    axes[1].scatter(n_preds, ot_costs)
+    axes[1].set_title("otc vs # Preds")
+    figures["otc_vs_num_bb"] = fig
+
+    fig, axes = plt.subplots(1, 2, sharex=True, sharey=True)
+    axes[0].hist(n_gts)
+    axes[0].set_title("# Ground truth boudning boxes")
+    axes[1].hist(n_preds)
+    axes[1].set_title("# Prediction boudning boxes")
+    figures["dist_n_bb"] = fig
+
+    fig = plt.figure()
+    plt.hist(ot_costs)
+    plt.title("OTC Distribution")
+    figures["dist_otc"] = fig
+
+    return figures
 
 
 def write2json(ot_costs, file_names):
@@ -59,27 +74,48 @@ def write2json(ot_costs, file_names):
 
 
 def eval_ot_costs(gts, results, cmap_func):
-    # costs = []
-    # progress = tqdm(total=len(results))
-
-    # with ProcessPoolExecutor(8) as pool:
-    #     futures = []
-
-    #     for x, y in zip(gts, results):
-    #         future = pool.submit(get_ot_cost, x, y, cmap_func)
-    #         futures.append(future)
-
-    #     for future in as_completed(futures):
-    #         progress.update(1)
-    #         costs.append(future.result())
-
-    # return costs
-
     return [get_ot_cost(x, y, cmap_func) for x, y in zip(gts, results)]
 
 
 @DATASETS.register_module()
 class CocoOtcDataset(CocoDataset):
+    def __init__(
+        self,
+        ann_file,
+        pipeline,
+        classes=None,
+        data_root=None,
+        img_prefix="",
+        seg_prefix=None,
+        proposal_file=None,
+        test_mode=False,
+        filter_empty_gt=True,
+        nptn_project_id="",
+        nptn_run_id="",
+        nptn_metadata_suffix="",
+    ):
+
+        super().__init__(
+            ann_file,
+            pipeline,
+            classes=classes,
+            data_root=data_root,
+            img_prefix=img_prefix,
+            seg_prefix=seg_prefix,
+            proposal_file=proposal_file,
+            test_mode=test_mode,
+            filter_empty_gt=filter_empty_gt,
+        )
+
+        self.nptn_project_id = nptn_project_id
+        self.nptn_run_id = nptn_run_id
+        self.nptn_on = False
+
+        if (nptn_project_id != "") and (nptn_run_id != ""):
+            self.add_neptune_hook(nptn_project_id, nptn_run_id)
+            self.nptn_metadata_suffix = nptn_metadata_suffix
+            self.nptn_on = True
+
     def evaluate(
         self,
         results,
@@ -91,6 +127,7 @@ class CocoOtcDataset(CocoDataset):
         iou_thrs=None,
         metric_items=None,
         eval_map=True,
+        otc_params={"alpha": 0.8, "beta": 0.4, "use_dummy": True},
     ):
         """Evaluate predicted bboxes. Override this method for your measure.
 
@@ -121,8 +158,11 @@ class CocoOtcDataset(CocoDataset):
         else:
             eval_results = {}
 
-        mean_otc = self.eval_OTC(results, logger=logger)
+        mean_otc = self.eval_OTC(results, **otc_params)
         eval_results["mOTC"] = mean_otc
+
+        if self.nptn_on:
+            self.upload_eval_results(eval_results)
 
         return eval_results
 
@@ -135,15 +175,62 @@ class CocoOtcDataset(CocoDataset):
             gts.append(self._ann2detformat(ann_info))
         return gts
 
-    def eval_OTC(self, results, logger=None):
+    @master_only
+    def upload_eval_results(self, eval_results):
+        nptn_run = neptune.init(
+            project=self.nptn_project_id, run=self.nptn_run_id
+        )
+        for k, v in eval_results.items():
+            nptn_run[f"evaluation/summary/{k}/{self.nptn_metadata_suffix}"] = v
+        nptn_run.stop()
+
+    @master_only
+    def upload_otc_results(self, ot_costs, gts, results):
+        nptn_run = neptune.init(
+            project=self.nptn_project_id, run=self.nptn_run_id
+        )
+
+        file_names = [x["img_metas"][0].data["ori_filename"] for x in self]
+        otc_per_img = json.dumps(list(zip(file_names, ot_costs)))
+        nptn_run[f"evaluation/otc/per_img/{self.nptn_metadata_suffix}"].upload(
+            File.from_content(otc_per_img, extension="json")
+        )
+
+        for k, v in get_stats(ot_costs, gts, results).items():
+            nptn_run[
+                f"evaluation/otc/stats/{k}/{self.nptn_metadata_suffix}"
+            ] = v
+
+        figs = draw_stats(ot_costs, gts, results)
+        for fig_name, fig in figs.items():
+            nptn_run[
+                f"evaluation/figs/{fig_name}/{self.nptn_metadata_suffix}"
+            ].upload(File.as_image(fig))
+
+        nptn_run.stop()
+
+    def eval_OTC(
+        self,
+        results,
+        alpha=0.8,
+        beta=0.4,
+        use_dummy=True,
+        get_average=True,
+    ):
         gts = self.get_gts()
-        cmap_func = lambda x, y: get_distmap(x, y, mode="giou")
+        cmap_func = lambda x, y: get_cmap(
+            x, y, alpha=alpha, beta=beta, mode="giou", use_dummy=use_dummy
+        )
         ot_costs = eval_ot_costs(gts, results, cmap_func)
-        # file_names = [x["img_metas"][0].data["ori_filename"] for x in self]
-        # write2json(ot_costs, file_names)
-        mean_ot_costs = np.mean(ot_costs)
-        # otc_stats = get_stats(ot_costs, gts, results, logger)
-        return mean_ot_costs
+
+        if self.nptn_on:
+            self.upload_otc_results(ot_costs, gts, results)
+
+        if get_average:
+            mean_ot_costs = np.mean(ot_costs)
+            return mean_ot_costs
+        else:
+            return ot_costs
 
     def evaluate_gt(
         self,
@@ -210,12 +297,16 @@ class CocoOtcDataset(CocoDataset):
                 )
         return np_bboxes
 
+    @master_only
+    def add_neptune_hook(self, nptn_project_id, nptn_run_id):
+        neptune.init(project=nptn_project_id, run=nptn_run_id)
 
-@DATASETS.register_module()
-class CocoOtcDatasetV2(CocoOtcDataset):
-    def eval_OTC(self, results, logger=None):
-        gts = self.get_gts()
-        cmap_func = lambda x, y: get_distmap_bg(x, y, mode="giou")
-        ot_costs = eval_ot_costs(gts, results, cmap_func)
-        mean_ot_costs = np.mean(ot_costs)
-        return mean_ot_costs
+
+# @DATASETS.register_module()
+# class CocoOtcDatasetV2(CocoOtcDataset):
+#     def eval_OTC(self, results, logger=None):
+#         gts = self.get_gts()
+#         cmap_func = lambda x, y: get_cmap(x, y, mode="giou")
+#         ot_costs = eval_ot_costs(gts, results, cmap_func)
+#         mean_ot_costs = np.mean(ot_costs)
+#         return mean_ot_costs
