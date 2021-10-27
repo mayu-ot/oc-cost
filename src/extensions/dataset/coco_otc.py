@@ -17,19 +17,13 @@ from mmcv.runner.dist_utils import master_only
 N_COCOCLASSES = 80
 
 
-def get_stats(ot_costs, gts, results, logger=None):
+def get_stats(ot_costs, gts, results):
     mean = np.mean(ot_costs)
     std = np.std(ot_costs)
     n_gts = [len(np.vstack(x)) for x in gts]
     n_preds = [len(np.vstack(x)) for x in results]
     cov_gts = np.cov(ot_costs, n_gts)[0, 1]
     cov_preds = np.cov(ot_costs, n_preds)[0, 1]
-
-    if logger is not None:
-        logger.info(f"mean OTC {mean:.4}")
-        logger.info(f"std OTC {std:.4}")
-        logger.info(f"covariance with # GTs {cov_gts:.4}")
-        logger.info(f"covariance with # GTs {cov_preds:.4}")
 
     return {
         "mean": mean,
@@ -112,7 +106,6 @@ class CocoOtcDataset(CocoDataset):
         self.nptn_on = False
 
         if (nptn_project_id != "") and (nptn_run_id != ""):
-            self.add_neptune_hook(nptn_project_id, nptn_run_id)
             self.nptn_metadata_suffix = nptn_metadata_suffix
             self.nptn_on = True
 
@@ -178,7 +171,10 @@ class CocoOtcDataset(CocoDataset):
     @master_only
     def upload_eval_results(self, eval_results):
         nptn_run = neptune.init(
-            project=self.nptn_project_id, run=self.nptn_run_id
+            project=self.nptn_project_id,
+            run=self.nptn_run_id,
+            mode="sync",
+            capture_hardware_metrics=False,
         )
         for k, v in eval_results.items():
             nptn_run[f"evaluation/summary/{k}/{self.nptn_metadata_suffix}"] = v
@@ -187,10 +183,13 @@ class CocoOtcDataset(CocoDataset):
     @master_only
     def upload_otc_results(self, ot_costs, gts, results):
         nptn_run = neptune.init(
-            project=self.nptn_project_id, run=self.nptn_run_id
+            project=self.nptn_project_id,
+            run=self.nptn_run_id,
+            mode="sync",
+            capture_hardware_metrics=False,
         )
 
-        file_names = [x["img_metas"][0].data["ori_filename"] for x in self]
+        file_names = [x["file_name"] for x in self.data_infos]
         otc_per_img = json.dumps(list(zip(file_names, ot_costs)))
         nptn_run[f"evaluation/otc/per_img/{self.nptn_metadata_suffix}"].upload(
             File.from_content(otc_per_img, extension="json")
@@ -296,17 +295,3 @@ class CocoOtcDataset(CocoDataset):
                     np.asarray([], dtype=np.float32).reshape(0, 5)
                 )
         return np_bboxes
-
-    @master_only
-    def add_neptune_hook(self, nptn_project_id, nptn_run_id):
-        neptune.init(project=nptn_project_id, run=nptn_run_id)
-
-
-# @DATASETS.register_module()
-# class CocoOtcDatasetV2(CocoOtcDataset):
-#     def eval_OTC(self, results, logger=None):
-#         gts = self.get_gts()
-#         cmap_func = lambda x, y: get_cmap(x, y, mode="giou")
-#         ot_costs = eval_ot_costs(gts, results, cmap_func)
-#         mean_ot_costs = np.mean(ot_costs)
-#         return mean_ot_costs
