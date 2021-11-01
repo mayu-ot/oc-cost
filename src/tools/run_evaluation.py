@@ -3,7 +3,6 @@ from mim import test, download, get_model_info
 from mim.utils import DEFAULT_CACHE_DIR
 import os
 import json
-from mmdet.utils.logger import get_root_logger
 import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,21 +10,7 @@ import click
 import time
 import neptune.new as neptune
 from neptune.new.types import File
-
-MODEL_CFGS = {
-    "retinanet_r50_fpn_2x_coco": "RetinaNet",
-    # "faster_rcnn_r50_fpn_2x_coco": "Faster-RCNN",
-    "yolof_r50_c5_8x8_1x_coco": "YOLOF",
-    # "detr_r50_8x2_150e_coco": "DETR",
-    # "vfnet_r50_fpn_mstrain_2x_coco": "VFNet",
-}
-
-HPARAM_RUNS = {
-    "retinanet_r50_fpn_2x_coco": "EV-23",
-    # "faster_rcnn_r50_fpn_2x_coco": "Faster-RCNN",
-    "yolof_r50_c5_8x8_1x_coco": "EV-31",
-    "vfnet_r50_fpn_mstrain_2x_coco": "EV-32",
-}
+from data.conf.model_cfg import HPARAM_RUNS, MODEL_CFGS
 
 
 @click.group()
@@ -147,6 +132,7 @@ def generate_reports_cmd(
 @click.option("--show-on", is_flag=True)
 @click.option("--eval-options", type=str, multiple=True)
 @click.option("-j", "--japanese", is_flag=True)
+@click.option("-s", "--run-subset", is_flag=False)
 def evaluate(
     dataset,
     out_dir,
@@ -155,7 +141,9 @@ def evaluate(
     show_on,
     eval_options,
     japanese,
+    run_subset,
 ):
+    args = locals()
     nptn_cfg = []
     nptn_run_id = ""
     if neptune_on:
@@ -172,6 +160,13 @@ def evaluate(
             f"data.test.nptn_run_id={nptn_run_id}",
             "",
         ]
+        run["params"] = args
+    if run_subset:
+        data_cfg = [
+            "data.test.ann_file=data/coco/annotations/instances_val2017_subset.json"
+        ]
+    else:
+        data_cfg = []
 
     if len(eval_options):
         eval_options = ["--eval-options"] + [x for x in eval_options]
@@ -224,7 +219,7 @@ def evaluate(
             "--cfg-options",
             f"data.test.type={dataset}",
             *nptn_cfg,
-            "data.test.ann_file=data/coco/annotations/instances_val2017_subset.json",  # to run evaluation on a small subset
+            *data_cfg,  # to run evaluation on a small subset
             "custom_imports.imports=[src.extensions.dataset.coco_custom, src.utils.matplotlib_settings]"
             if japanese
             else "custom_imports.imports=[src.extensions.dataset.coco_custom]",

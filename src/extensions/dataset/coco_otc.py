@@ -20,8 +20,8 @@ N_COCOCLASSES = 80
 def get_stats(ot_costs, gts, results):
     mean = np.mean(ot_costs)
     std = np.std(ot_costs)
-    n_gts = [sum(map(len, x)) for x in gts if x is not None]
-    n_preds = [sum(map(len, x)) for x in results is not None]
+    n_gts = [sum(map(len, x)) for x in gts]
+    n_preds = [sum(map(len, x)) for x in results]
     cov_gts = np.cov(ot_costs, n_gts)[0, 1]
     cov_preds = np.cov(ot_costs, n_preds)[0, 1]
 
