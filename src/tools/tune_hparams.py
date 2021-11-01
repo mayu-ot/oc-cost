@@ -11,10 +11,10 @@ import neptune.new.integrations.optuna as optuna_utils
 
 MODEL_CFGS = {
     # "retinanet_r50_fpn_2x_coco": "RetinaNet",
-    # "faster_rcnn_r50_fpn_2x_coco": "Faster-RCNN",
+    "faster_rcnn_r50_fpn_2x_coco": "Faster-RCNN",
     # "yolof_r50_c5_8x8_1x_coco": "YOLOF",
     # "detr_r50_8x2_150e_coco": "DETR",
-    "vfnet_r50_fpn_mstrain_2x_coco": "VFNet",
+    # "vfnet_r50_fpn_mstrain_2x_coco": "VFNet",
 }
 
 
@@ -41,7 +41,9 @@ def hptune(dataset, out_dir):
             name="tune_hparams",
             tags=["optuna", "hptune", MODEL_CFGS[model_cfg]],
         )
-        neptune_callback = optuna_utils.NeptuneCallback(run)
+        neptune_callback = optuna_utils.NeptuneCallback(
+            run, log_plot_param_importances=False
+        )
 
         if not os.path.exists(
             os.path.join(DEFAULT_CACHE_DIR, model_cfg + ".py")
