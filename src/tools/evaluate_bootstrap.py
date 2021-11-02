@@ -19,14 +19,10 @@ from tqdm import tqdm
 import glob
 import pandas as pd
 from tabulate import tabulate
-
-MODEL_CFGS = {
-    "retinanet_r50_fpn_2x_coco": "RetinaNet",
-    "faster_rcnn_r50_fpn_2x_coco": "Faster-RCNN",
-    "yolof_r50_c5_8x8_1x_coco": "YOLOF",
-    "detr_r50_8x2_150e_coco": "DETR",
-    "vfnet_r50_fpn_mstrain_2x_coco": "VFNet",
-}
+import neptune.new as neptune
+from neptune.new.types import File
+from data.conf.model_cfg import MODEL_CFGS
+from src.utils.neptune_utils import load_hparam_neptune
 
 
 @click.group()
@@ -52,8 +48,17 @@ def get_overall_measures(out_dir):
     "out_dir", type=click.Path(exists=True, file_okay=False, dir_okay=True)
 )
 @click.argument("ratio", default=0.8)
-def generate_reports(
+def generate_reports_cmd(
     out_dir, ratio, measures=["bbox_mAP", "bbox_mAP_50", "bbox_mAP_75", "mOTC"]
+):
+    return generate_reports(out_dir, ratio, measures)
+
+
+def generate_reports(
+    out_dir,
+    ratio,
+    measures=["bbox_mAP", "bbox_mAP_50", "bbox_mAP_75", "mOTC"],
+    nptn_run=None,
 ):
     sns.set_style("white")
     work_dir = out_dir
@@ -85,10 +90,14 @@ def generate_reports(
         ax.set_xlabel("")
         ax.set_xticklabels(ax.get_xticklabels(), rotation=45)
 
+    if nptn_run is not None:
+        nptn_run["figs/summary"].upload(File.as_image(f))
+
     f.savefig(
         os.path.join(work_dir, f"{ratio}_measures_dist.pdf"),
         bbox_inches="tight",
     )
+
     display_bias(out_dir, measures, data_frame, ratio)
 
 
@@ -162,7 +171,20 @@ def eval_on_subset(out_pkl, model_cfg, ratio=0.8):
     "--load-dir", default=None, type=click.Path(file_okay=False, dir_okay=True)
 )
 @click.option("--ratio", default=0.8)
-def evaluate(out_dir, load_dir, ratio):
+@click.option("--use-tuned-hparam", is_flag=True)
+@click.option("--neptune-on", is_flag=True)
+def evaluate(out_dir, load_dir, ratio, use_tuned_hparam, neptune_on):
+    args = locals()
+    if neptune_on:
+        proj_name = os.environ["NEPTUNE_PROJECT"]
+        run = neptune.init(
+            proj_name,
+            name="evaluate_bootstrap",
+            capture_hardware_metrics=False,
+            tags=["bootstrap"],
+        )
+        run["params"] = args
+
     if load_dir is None:
         timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
         out_dir = os.path.join(out_dir, timestamp)
@@ -184,14 +206,9 @@ def evaluate(out_dir, load_dir, ratio):
         model_info = model_infos.loc[model_cfg]
         checkpoint_name = os.path.basename(model_info.weight)
 
-        # test hyperparameters
-        # hparams = json.load(
-        #     open(
-        #         f"data/processed/tune_hparams_otc/{MODEL_CFGS[model_cfg]}_tune_res.json"
-        #     )
-        # )
-        # score_thr = hparams["best_params"]["score_thr"]
-        # iou_threshold = hparams["best_params"]["iou_threshold"]
+        hparam_options = ()
+        if use_tuned_hparam:
+            hparam_options = load_hparam_neptune(model_cfg)
 
         out_pkl = f"{os.path.join(out_dir, MODEL_CFGS[model_cfg]+'.pkl')}"
         if not os.path.exists(out_pkl):
@@ -210,8 +227,7 @@ def evaluate(out_dir, load_dir, ratio):
                     f"data.test.type=CocoOtcDataset",
                     "custom_imports.imports=[src.extensions.dataset.coco_custom]",
                     "custom_imports.allow_failed_imports=False",
-                    # f"model.test_cfg.score_thr={score_thr}",
-                    # f"model.test_cfg.nms.iou_threshold={iou_threshold}",
+                    *hparam_options,
                 ),
             )
 
@@ -235,9 +251,17 @@ def evaluate(out_dir, load_dir, ratio):
                 measures.append(future.result())
 
         out_file = os.path.join(
-            out_dir, MODEL_CFGS[model_cfg] + f"{ratio}.measures.json"
+            out_dir, MODEL_CFGS[model_cfg] + f".{ratio}.measures.json"
         )
         json.dump(measures, open(out_file, "w"))
+        if neptune_on:
+            run[f"measures/{MODEL_CFGS[model_cfg]}"].upload(out_file)
+
+    if neptune_on:
+        generate_reports(out_dir, ratio, nptn_run=run)
+        run.stop()
+    else:
+        generate_reports(out_dir, ratio)
 
 
 if __name__ == "__main__":

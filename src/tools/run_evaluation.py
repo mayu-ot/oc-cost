@@ -10,7 +10,8 @@ import click
 import time
 import neptune.new as neptune
 from neptune.new.types import File
-from data.conf.model_cfg import HPARAM_RUNS, MODEL_CFGS
+from data.conf.model_cfg import MODEL_CFGS
+from src.utils.neptune_utils import load_hparam_neptune
 
 
 @click.group()
@@ -91,22 +92,6 @@ def generate_reports(
         nptn_run.stop()
 
     fig.savefig(os.path.join(work_dir, "metric.pdf"), bbox_inches="tight")
-
-
-def load_hparam_neptune(run_id):
-    run = neptune.init(
-        project=os.environ["NEPTUNE_PROJECT"], run=run_id, mode="read-only"
-    )
-    hparams = run["best/params"].fetch()
-
-    score_thr = hparams["best"]["params"]["score_thr"]
-    iou_threshold = hparams["best"]["params"]["iou_threshold"]
-    hparam_options = (
-        f"model.test_cfg.score_thr={score_thr}",
-        f"model.test_cfg.nms.iou_threshold={iou_threshold}",
-    )
-    run.stop()
-    return hparam_options
 
 
 @cli.command()
@@ -200,8 +185,7 @@ def evaluate(
         # test hyperparameters
         hparam_options = ()
         if use_tuned_hparam:
-            if model_cfg in HPARAM_RUNS:
-                hparam_options = load_hparam_neptune(HPARAM_RUNS[model_cfg])
+            hparam_options = load_hparam_neptune(model_cfg)
 
         if len(nptn_cfg):
             nptn_cfg[
