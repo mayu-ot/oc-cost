@@ -17,11 +17,24 @@ from mmcv.runner.dist_utils import master_only
 N_COCOCLASSES = 80
 
 
+def count_items(items):
+    ns = []
+    for x in items:
+        if x is None:
+            n = 0
+        else:
+            n = sum(map(len, x))
+        ns.append(n)
+    return ns
+
+
 def get_stats(ot_costs, gts, results):
     mean = np.mean(ot_costs)
     std = np.std(ot_costs)
-    n_gts = [sum(map(len, x)) for x in gts]
-    n_preds = [sum(map(len, x)) for x in results]
+
+    n_gts = count_items(gts)
+    n_preds = count_items(results)
+
     cov_gts = np.cov(ot_costs, n_gts)[0, 1]
     cov_preds = np.cov(ot_costs, n_preds)[0, 1]
 
@@ -34,8 +47,8 @@ def get_stats(ot_costs, gts, results):
 
 
 def draw_stats(ot_costs, gts, results):
-    n_gts = [len(np.vstack(x)) for x in gts]
-    n_preds = [len(np.vstack(x)) for x in results]
+    n_gts = count_items(gts)
+    n_preds = count_items(results)
     figures = {}
 
     fig, axes = plt.subplots(1, 2)
