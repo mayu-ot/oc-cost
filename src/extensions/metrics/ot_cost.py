@@ -139,9 +139,7 @@ def get_cmap(
     return dist_a, dist_b, cost_map
 
 
-def subtract_dummy2dummy_cost(M, outputs):
-    if len(outputs) == 2:
-        total_cost, log = outputs
+def subtract_dummy2dummy_cost(M, total_cost, log):
     G = log["G"]
     return total_cost - M[-1, -1] * G[-1, -1]
 
@@ -174,6 +172,10 @@ def get_ot_cost(a_detection, b_detection, cmap_func, return_matrix=False):
         return 1  #
 
     a, b, M = cmap_func(a_detection, b_detection)
-    outputs = ot.emd2(a, b, M, return_matrix=return_matrix)
+    total_cost, log = ot.emd2(a, b, M, return_matrix=True)
+    total_cost = subtract_dummy2dummy_cost(M, total_cost, log)
 
-    return outputs
+    if return_matrix:
+        return total_cost, log
+    else:
+        return total_cost
