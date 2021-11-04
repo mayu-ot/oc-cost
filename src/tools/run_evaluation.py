@@ -114,21 +114,32 @@ def generate_reports_cmd(
 @click.argument("out_dir", type=click.Path(file_okay=False, dir_okay=True))
 @click.option("--neptune-on", is_flag=True)
 @click.option("--use-tuned-hparam", is_flag=True)
+@click.option("--alpha", default=0.5)
+@click.option("--beta", default=0.4)
 @click.option("--show-on", is_flag=True)
 @click.option("--eval-options", type=str, multiple=True)
 @click.option("-j", "--japanese", is_flag=True)
-@click.option("-s", "--run-subset", is_flag=False)
+@click.option("-s", "--run-subset", is_flag=True)
 def evaluate(
     dataset,
     out_dir,
     neptune_on,
     use_tuned_hparam,
+    alpha,
+    beta,
     show_on,
     eval_options,
     japanese,
     run_subset,
 ):
     args = locals()
+
+    tags = [f"alpha={alpha}", f"beta={beta}"]
+    if use_tuned_hparam:
+        tags.append("use-tuned-param")
+    if run_subset:
+        tags.append("run-subset")
+
     nptn_cfg = []
     nptn_run_id = ""
     if neptune_on:
@@ -138,6 +149,7 @@ def evaluate(
             name="run_evaluation",
             mode="sync",
             capture_hardware_metrics=False,
+            tags=tags,
         )
         nptn_run_id = run._short_id
         nptn_cfg = [
@@ -154,7 +166,13 @@ def evaluate(
         data_cfg = []
 
     if len(eval_options):
-        eval_options = ["--eval-options"] + [x for x in eval_options]
+        eval_options = (
+            ["--eval-options"]
+            + [
+                f"otc_params=[(alpha, {alpha}), (beta, {beta}), (use_dummy, True)]"
+            ]
+            + [x for x in eval_options]
+        )
 
     timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
     out_dir = os.path.join(out_dir, timestamp)
@@ -185,7 +203,9 @@ def evaluate(
         # test hyperparameters
         hparam_options = ()
         if use_tuned_hparam:
-            hparam_options = load_hparam_neptune(model_cfg)
+            hparam_options = load_hparam_neptune(
+                model_cfg, alpha=alpha, beta=beta
+            )
 
         if len(nptn_cfg):
             nptn_cfg[
@@ -241,6 +261,7 @@ def evaluate(
 
         if neptune_on:
             run[f"other_args/{MODEL_CFGS[model_cfg]}"] = json.dumps(other_args)
+            run[f"results/{MODEL_CFGS[model_cfg]}"].upload(out_pkl)
 
     generate_reports(out_dir, 4, nptn_run_id)
 
