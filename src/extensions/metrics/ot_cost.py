@@ -85,9 +85,10 @@ def add_label(result):
 
 
 def cost_func(x, y, mode: str = "giou", alpha: float = 0.8):
-    loc_cost = (
-        1 - get_bbox_overlaps(x[:4][None, :], y[:4][None, :], mode)
-    ) * 0.5  # normalized to [0, 1]
+    giou_val = get_bbox_overlaps(
+        x[:4][None, :], y[:4][None, :], mode
+    )  # range [-1, 1]
+    loc_cost = 1 - (giou_val + 1) * 0.5  # normalized to [0, 1]
     l_x, l_y = x[-1], y[-1]
     if l_x == l_y:
         cls_cost = np.abs(x[-2] - y[-2])
@@ -139,9 +140,12 @@ def get_cmap(
     return dist_a, dist_b, cost_map
 
 
-def subtract_dummy2dummy_cost(M, total_cost, log):
+def postprocess(M, total_cost, log):
     G = log["G"]
-    return total_cost - M[-1, -1] * G[-1, -1]
+    G[-1, -1] = 0
+    G /= G.sum()
+    total_cost = (M * G).sum()
+    return total_cost
 
 
 def get_ot_cost(a_detection, b_detection, cmap_func, return_matrix=False):
@@ -155,25 +159,19 @@ def get_ot_cost(a_detection, b_detection, cmap_func, return_matrix=False):
     Returns:
         [float]: optimal transportation cost
     """
-    is_a_none = a_detection is None
-    is_b_none = b_detection is None
 
-    if not is_a_none:
-        if sum([len(x) for x in a_detection]) == 0:
-            is_a_none = True
-
-    if not is_b_none:
-        if sum([len(x) for x in b_detection]) == 0:
-            is_b_none = True
-
-    if is_a_none and is_b_none:
-        return 0  # no object is detected in both results
-    if is_a_none or is_b_none:
-        return 1  #
+    if sum(map(len, a_detection)) == 0:
+        if sum(map(len, b_detection)) == 0:
+            return 0
 
     a, b, M = cmap_func(a_detection, b_detection)
     total_cost, log = ot.emd2(a, b, M, return_matrix=True)
-    total_cost = subtract_dummy2dummy_cost(M, total_cost, log)
+    total_cost = postprocess(M, total_cost, log)
+    log["M"] = M
+    log["a"] = a
+    log["b"] = b
+
+    # total_cost = 2 / (1 + np.exp(-total_cost)) - 1  # normalize [0, 1]
 
     if return_matrix:
         return total_cost, log

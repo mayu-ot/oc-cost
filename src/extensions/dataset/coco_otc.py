@@ -10,6 +10,7 @@ import time
 import os.path as osp
 from mmcv.utils import get_logger
 import matplotlib.pyplot as plt
+import seaborn as sns
 import neptune.new as neptune
 from neptune.new.types import File
 from mmcv.runner.dist_utils import master_only
@@ -51,26 +52,30 @@ def draw_stats(ot_costs, gts, results):
     n_preds = count_items(results)
     figures = {}
 
-    fig, axes = plt.subplots(1, 2)
-    axes[0].scatter(n_gts, ot_costs)
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+    sns.kdeplot(x=n_gts, y=ot_costs, fill=True, cmap="rocket", ax=axes[0])
+    # axes[0].scatter(n_gts, ot_costs)
     axes[0].set_title("otc vs # GTs")
-    axes[1].scatter(n_preds, ot_costs)
+    sns.kdeplot(x=n_preds, y=ot_costs, fill=True, cmap="rocket", ax=axes[1])
+    # axes[1].scatter(n_preds, ot_costs)
     axes[1].set_title("otc vs # Preds")
     figures["otc_vs_num_bb"] = fig
 
     fig, axes = plt.subplots(1, 2, sharex=True, sharey=True)
-    axes[0].hist(n_gts)
+    axes[0].hist(n_gts, bins=10)
     axes[0].set_title("# Ground truth boudning boxes")
-    axes[1].hist(n_preds)
+    axes[1].hist(n_preds, bins=10)
     axes[1].set_title("# Prediction boudning boxes")
     figures["dist_n_bb"] = fig
 
     fig = plt.figure()
-    plt.hist(ot_costs)
+    plt.hist(ot_costs, bins=10)
     plt.title("OTC Distribution")
     figures["dist_otc"] = fig
 
-    return figures
+    fig_src = {"ot_costs": ot_costs, "n_gts": n_gts, "n_preds": n_preds}
+
+    return figures, fig_src
 
 
 def write2json(ot_costs, file_names):
@@ -133,7 +138,7 @@ class CocoOtcDataset(CocoDataset):
         iou_thrs=None,
         metric_items=None,
         eval_map=True,
-        otc_params={"alpha": 0.8, "beta": 0.4, "use_dummy": True},
+        otc_params=[("alpha", 0.5), ("beta", 0.4), ("use_dummy", True)],
     ):
         """Evaluate predicted bboxes. Override this method for your measure.
 
@@ -164,6 +169,7 @@ class CocoOtcDataset(CocoDataset):
         else:
             eval_results = {}
 
+        otc_params = {k: v for k, v in otc_params}
         mean_otc = self.eval_OTC(results, **otc_params)
         eval_results["mOTC"] = mean_otc
 
@@ -177,8 +183,13 @@ class CocoOtcDataset(CocoDataset):
         for i in range(len(self.img_ids)):
             ann_ids = self.coco.get_ann_ids(img_ids=self.img_ids[i])
             ann_info = self.coco.load_anns(ann_ids)
-
-            gts.append(self._ann2detformat(ann_info))
+            gt = self._ann2detformat(ann_info)
+            if gt is None:
+                gt = [
+                    np.asarray([]).reshape(0, 5)
+                    for _ in range(len(self.CLASSES))
+                ]
+            gts.append(gt)
         return gts
 
     @master_only
@@ -213,11 +224,20 @@ class CocoOtcDataset(CocoDataset):
                 f"evaluation/otc/stats/{k}/{self.nptn_metadata_suffix}"
             ] = v
 
-        figs = draw_stats(ot_costs, gts, results)
+        figs, fig_src = draw_stats(ot_costs, gts, results)
         for fig_name, fig in figs.items():
             nptn_run[
                 f"evaluation/figs/{fig_name}/{self.nptn_metadata_suffix}"
             ].upload(File.as_image(fig))
+            fig.savefig(f"tmp/{fig_name}.pdf", bbox_inches="tight")
+            nptn_run[
+                f"evaluation/figs/pdfs/{fig_name}/{self.nptn_metadata_suffix}"
+            ].upload(f"tmp/{fig_name}.pdf")
+
+        # for src_name, v in fig_src.items():
+        #     nptn_run[
+        #         f"evaluation/figs/src/{src_name}/{self.nptn_metadata_suffix}"
+        #     ] = v
 
         nptn_run.stop()
 
@@ -233,7 +253,10 @@ class CocoOtcDataset(CocoDataset):
         cmap_func = lambda x, y: get_cmap(
             x, y, alpha=alpha, beta=beta, mode="giou", use_dummy=use_dummy
         )
+        tic = time.time()
         ot_costs = eval_ot_costs(gts, results, cmap_func)
+        toc = time.time()
+        print("OTC DONE (t={:0.2f}s).".format(toc - tic))
 
         if self.nptn_on:
             self.upload_otc_results(ot_costs, gts, results)
@@ -252,7 +275,12 @@ class CocoOtcDataset(CocoDataset):
     ):
 
         gts = self.get_gts()
-        for gt in gts:
+        n = len(gts)
+        for i in range(n):
+            gt = gts[i]
+            if gt is None:
+                gts[i] = [np.asarray([]).reshape(0, 5) for _ in self.CLASSES]
+                continue
             for bbox in gt:
                 if len(bbox) == 0:
                     continue
@@ -263,7 +291,7 @@ class CocoOtcDataset(CocoDataset):
                     w * bbox_noise_level * np.random.choice((-1, 1), w.shape)
                 )
                 shift_y = (
-                    w * bbox_noise_level * np.random.choice((-1, 1), h.shape)
+                    h * bbox_noise_level * np.random.choice((-1, 1), h.shape)
                 )
                 bbox[:, 0] += shift_x
                 bbox[:, 2] += shift_x
