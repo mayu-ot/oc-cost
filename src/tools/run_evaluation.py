@@ -113,7 +113,7 @@ def generate_reports_cmd(
 @click.argument("dataset")
 @click.argument("out_dir", type=click.Path(file_okay=False, dir_okay=True))
 @click.option("--neptune-on", is_flag=True)
-@click.option("--use-tuned-hparam", is_flag=True)
+@click.option("--use-tuned-hparam", default="")
 @click.option("--alpha", default=0.5)
 @click.option("--beta", default=0.4)
 @click.option("--show-on", is_flag=True)
@@ -135,7 +135,7 @@ def evaluate(
     args = locals()
 
     tags = [f"alpha={alpha}", f"beta={beta}"]
-    if use_tuned_hparam:
+    if len(use_tuned_hparam):
         tags.append("use-tuned-param")
     if run_subset:
         tags.append("run-subset")
@@ -165,14 +165,11 @@ def evaluate(
     else:
         data_cfg = []
 
-    if len(eval_options):
-        eval_options = (
-            ["--eval-options"]
-            + [
-                f"otc_params=[(alpha, {alpha}), (beta, {beta}), (use_dummy, True)]"
-            ]
-            + [x for x in eval_options]
-        )
+    eval_options = (
+        ["--eval-options"]
+        + [f"otc_params=[(alpha, {alpha}), (beta, {beta}), (use_dummy, True)]"]
+        + [x for x in eval_options]
+    )
 
     timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
     out_dir = os.path.join(out_dir, timestamp)
@@ -202,10 +199,8 @@ def evaluate(
 
         # test hyperparameters
         hparam_options = ()
-        if use_tuned_hparam:
-            hparam_options = load_hparam_neptune(
-                model_cfg, alpha=alpha, beta=beta
-            )
+        if len(use_tuned_hparam):
+            hparam_options = load_hparam_neptune(model_cfg, use_tuned_hparam)
 
         if len(nptn_cfg):
             nptn_cfg[
