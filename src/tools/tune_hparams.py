@@ -11,10 +11,10 @@ import neptune.new.integrations.optuna as optuna_utils
 
 MODEL_CFGS = {
     # "retinanet_r50_fpn_2x_coco": "RetinaNet",
-    "faster_rcnn_r50_fpn_2x_coco": "Faster-RCNN",
-    # "yolof_r50_c5_8x8_1x_coco": "YOLOF",
+    # "faster_rcnn_r50_fpn_2x_coco": "Faster-RCNN",
+    "yolof_r50_c5_8x8_1x_coco": "YOLOF",
     # "detr_r50_8x2_150e_coco": "DETR",
-    # "vfnet_r50_fpn_mstrain_2x_coco": "VFNet",
+    "vfnet_r50_fpn_mstrain_2x_coco": "VFNet",
 }
 
 
@@ -26,7 +26,9 @@ def cli():
 @cli.command()
 @click.argument("dataset")
 @click.argument("out_dir", type=click.Path(file_okay=False, dir_okay=True))
-def hptune(dataset, out_dir):
+@click.option("--measure", default="mOTC")
+@click.option("--eval-options", type=str, multiple=True)
+def hptune(dataset, out_dir, measure, eval_options):
     timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
     out_dir = os.path.join(out_dir, timestamp)
 
@@ -35,11 +37,14 @@ def hptune(dataset, out_dir):
 
     model_infos = get_model_info("mmdet")
 
+    if len(eval_options):
+        eval_options = ["--eval-options"] + [x for x in eval_options]
+
     for model_cfg in MODEL_CFGS.keys():
         run = neptune.init(
             project=os.environ["NEPTUNE_PROJECT"],
             name="tune_hparams",
-            tags=["optuna", "hptune", MODEL_CFGS[model_cfg]],
+            tags=["optuna", "hptune", MODEL_CFGS[model_cfg], measure],
         )
         neptune_callback = optuna_utils.NeptuneCallback(
             run, log_plot_param_importances=False
@@ -79,8 +84,7 @@ def hptune(dataset, out_dir):
                     "custom_imports.allow_failed_imports=False",
                     f"model.test_cfg.score_thr={score_thr}",
                     f"model.test_cfg.nms.iou_threshold={iou_threshold}",
-                    "--eval-options",
-                    "eval_map=False",
+                    *eval_options,
                 ),
             )
 
@@ -88,15 +92,20 @@ def hptune(dataset, out_dir):
                 files = glob.glob(os.path.join(out_dir, "*.json"))
                 latest_file = max(files, key=os.path.getctime)
                 res = json.load(open(latest_file))
-                cost = res["metric"]["mOTC"]
+                cost = res["metric"][measure]
             else:
                 cost = None
 
             return cost
 
+        if measure == "mOTC":
+            direction = "minimize"
+        else:
+            direction = "maximize"
+
         study = optuna.create_study(
             study_name=f"{MODEL_CFGS[model_cfg]}",
-            direction="minimize",
+            direction=direction,
         )  # Create a new study.
         study.optimize(objective, n_trials=30, callbacks=[neptune_callback])
 
