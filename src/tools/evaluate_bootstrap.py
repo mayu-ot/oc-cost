@@ -12,8 +12,8 @@ import time
 import pdb
 import tempfile
 
-from traitlets.traitlets import default
 from src.extensions.dataset.coco_custom import CocoOtcDataset
+from src.utils.neptune_utils import load_results
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from tqdm import tqdm
 import glob
@@ -23,6 +23,8 @@ import neptune.new as neptune
 from neptune.new.types import File
 from data.conf.model_cfg import MODEL_CFGS
 from src.utils.neptune_utils import load_hparam_neptune
+from mmdet.datasets import build_dataset, get_loading_pipeline
+from random import choices
 
 
 @click.group()
@@ -133,9 +135,19 @@ def display_bias(out_dir, measures, data_frame, ratio):
     table.to_csv(os.path.join(out_dir, f"{ratio}_bias.csv"))
 
 
+def prepare_dataset(model_cfg, data_file):
+    cfg = Config.fromfile(os.path.join(DEFAULT_CACHE_DIR, model_cfg + ".py"))
+    cfg.data.test.type = "CocoOtcDataset"
+    cfg.data.test.ann_file = data_file
+    cfg.data.test.test_mode = True
+    cfg.data.test.pop("samples_per_gpu", 0)
+    cfg.data.test.pipeline = get_loading_pipeline(cfg.data.train.pipeline)
+    dataset = build_dataset(cfg.data.test)
+    return dataset
+
+
 def eval_on_subset(out_pkl, model_cfg, ratio=0.8):
     results = mmcv.load(out_pkl)
-    cfg = Config.fromfile(os.path.join(DEFAULT_CACHE_DIR, model_cfg + ".py"))
     # write subset json file to tmp file
     dataset = json.load(
         open("data/coco/annotations/instances_val2017.json", "r")
@@ -143,23 +155,34 @@ def eval_on_subset(out_pkl, model_cfg, ratio=0.8):
     n_dataset = len(dataset["images"])
     n_sub = int(n_dataset * ratio)
 
-    rng = np.random.default_rng()
-    sub_idx = rng.permutation(n_dataset)[:n_sub]
+    sub_idx = choices(range(n_dataset), k=n_sub)
+    new_ids = range(len(sub_idx))
 
     sub_results = [results[i] for i in sub_idx]
 
-    dataset["images"] = [dataset["images"][i] for i in sub_idx]
+    sub_dataset = {
+        "images": [],
+        "annotations": [],
+        "categories": dataset["categories"].copy(),
+    }
+    for i, n_id in zip(sub_idx, new_ids):
+        sub_dataset["images"].append(dataset["images"][i].copy())
+        c_id = sub_dataset["images"][-1]["id"]
+        sub_dataset["images"][-1]["id"] = n_id
+        anns = [
+            x.copy() for x in dataset["annotations"] if x["image_id"] == c_id
+        ]
+        for ann in anns:
+            ann["image_id"] = n_id
+            ann["id"] = len(sub_dataset["annotations"])
+            sub_dataset["annotations"].append(ann)
 
     tmp_dir = tempfile.TemporaryDirectory()
     tmp_file = os.path.join(tmp_dir.name, "sub_dataset.json")
-    json.dump(dataset, open(tmp_file, "w"))
+    json.dump(sub_dataset, open(tmp_file, "w"))
 
-    coco = CocoOtcDataset(
-        tmp_file,
-        cfg.data.test.pipeline,
-        test_mode=True,
-    )
-    measure = coco.evaluate(sub_results)
+    dataset = prepare_dataset(model_cfg, tmp_file)
+    measure = dataset.evaluate(sub_results)
     return measure
 
 
@@ -171,10 +194,23 @@ def eval_on_subset(out_pkl, model_cfg, ratio=0.8):
     "--load-dir", default=None, type=click.Path(file_okay=False, dir_okay=True)
 )
 @click.option("--ratio", default=0.8)
-@click.option("--use-tuned-hparam", is_flag=True)
+@click.option("--download-res", default="")
+@click.option("--use-tuned-hparam", default="")
+@click.option("--alpha", default=0.5)
+@click.option("--beta", default=0.4)
 @click.option("--neptune-on", is_flag=True)
-def evaluate(out_dir, load_dir, ratio, use_tuned_hparam, neptune_on):
+def evaluate(
+    out_dir,
+    load_dir,
+    ratio,
+    download_res,
+    use_tuned_hparam,
+    alpha,
+    beta,
+    neptune_on,
+):
     args = locals()
+    tags = [f"alpha={alpha}", f"beta={beta}"]
     if neptune_on:
         proj_name = os.environ["NEPTUNE_PROJECT"]
         run = neptune.init(
@@ -196,6 +232,10 @@ def evaluate(out_dir, load_dir, ratio, use_tuned_hparam, neptune_on):
 
     model_infos = get_model_info("mmdet")
 
+    eval_options = ["--eval-options"] + [
+        f"otc_params=[(alpha, {alpha}), (beta, {beta}), (use_dummy, True)]"
+    ]
+
     for model_cfg in MODEL_CFGS.keys():
 
         if not os.path.exists(
@@ -207,10 +247,15 @@ def evaluate(out_dir, load_dir, ratio, use_tuned_hparam, neptune_on):
         checkpoint_name = os.path.basename(model_info.weight)
 
         hparam_options = ()
-        if use_tuned_hparam:
-            hparam_options = load_hparam_neptune(model_cfg)
+        if len(use_tuned_hparam):
+            hparam_options = load_hparam_neptune(model_cfg, use_tuned_hparam)
 
         out_pkl = f"{os.path.join(out_dir, MODEL_CFGS[model_cfg]+'.pkl')}"
+
+        if len(download_res):
+            results = load_results(download_res, MODEL_CFGS[model_cfg])
+            mmcv.dump(results, out_pkl)
+
         if not os.path.exists(out_pkl):
             _ = test(
                 package="mmdet",
@@ -228,6 +273,7 @@ def evaluate(out_dir, load_dir, ratio, use_tuned_hparam, neptune_on):
                     "custom_imports.imports=[src.extensions.dataset.coco_custom]",
                     "custom_imports.allow_failed_imports=False",
                     *hparam_options,
+                    *eval_options,
                 ),
             )
 

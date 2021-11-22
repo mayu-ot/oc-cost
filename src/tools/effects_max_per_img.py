@@ -7,14 +7,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import click
 import time
-
-MODEL_CFGS = {
-    # "retinanet_r50_fpn_2x_coco": "RetinaNet",
-    # "faster_rcnn_r50_fpn_2x_coco": "Faster-RCNN",
-    # "yolof_r50_c5_8x8_1x_coco": "YOLOF",
-    # "detr_r50_8x2_150e_coco": "DETR",
-    "vfnet_r50_fpn_mstrain_2x_coco": "VFNet",
-}
+import neptune.new as neptune
+from neptune.new.types import File
+from data.conf.model_cfg import MODEL_CFGS
+import glob
+import tempfile
 
 
 @click.group()
@@ -82,9 +79,66 @@ def generate_reports(
 
 
 @cli.command()
+@click.argument("run_id", type=str)
+def upload_reports(run_id):
+    run = neptune.init(project=os.environ["NEPTUNE_PROJECT"], run=run_id)
+    measures = {}
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for m in range(10, 200, 20):
+            run[f"measures/max_per_img={m}"].download(tmpdir)
+            measures[m] = json.load(
+                open(os.path.join(tmpdir, f"max_per_img={m}.json"))
+            )
+
+    sns.set("paper")
+    x = []
+    mAP = []
+    otc = []
+    for k, v in measures.items():
+        x.append(k)
+        mAP.append(v["metric"]["bbox_mAP"])
+        otc.append(v["metric"]["mOTC"])
+
+    f, axes = plt.subplots(1, 2, sharex=True, figsize=(10, 3))
+    axes[0].plot(x, mAP)
+    axes[0].set_title("mAP vs detections per image")
+
+    axes[1].plot(x, otc)
+    axes[1].set_title("mOTC vs detections per image")
+
+    run["figs/performance_vs_det_per_img"].upload(File.as_image(f))
+
+    f_name = os.path.join("tmp/", "performance_vs_det_per_img.pdf")
+    f.savefig(f_name, bbox_inches="tight")
+    run["figs/performance_vs_det_per_img_pdf"].upload(f_name)
+    run.stop()
+
+
+@cli.command()
 @click.argument("dataset")
 @click.argument("out_dir", type=click.Path(file_okay=False, dir_okay=True))
-def evaluate(dataset, out_dir):
+@click.option("--neptune-on", is_flag=True)
+@click.option("-s", "--run-subset", is_flag=True)
+def evaluate(dataset, out_dir, neptune_on, run_subset):
+    args = locals()
+    if neptune_on:
+        proj_name = os.environ["NEPTUNE_PROJECT"]
+        run = neptune.init(
+            proj_name,
+            name="effects_max_per_img",
+            mode="sync",
+            capture_hardware_metrics=False,
+            tags=["behavior analysis"],
+        )
+        run["params"] = args
+
+    if run_subset:
+        data_cfg = [
+            "data.test.ann_file=data/coco/annotations/instances_val2017_subset.json"
+        ]
+    else:
+        data_cfg = []
+
     timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
     out_dir = os.path.join(out_dir, timestamp)
 
@@ -92,37 +146,39 @@ def evaluate(dataset, out_dir):
         os.makedirs(out_dir)
 
     model_infos = get_model_info("mmdet")
+    model_cfg = "vfnet_r50_fpn_mstrain_2x_coco"
 
-    for model_cfg in MODEL_CFGS.keys():
+    if not os.path.exists(os.path.join(DEFAULT_CACHE_DIR, model_cfg + ".py")):
+        download("mmdet", [model_cfg])
 
-        if not os.path.exists(
-            os.path.join(DEFAULT_CACHE_DIR, model_cfg + ".py")
-        ):
-            download("mmdet", [model_cfg])
+    model_info = model_infos.loc[model_cfg]
+    checkpoint_name = os.path.basename(model_info.weight)
 
-        model_info = model_infos.loc[model_cfg]
-        checkpoint_name = os.path.basename(model_info.weight)
+    for m in range(10, 200, 20):  # range(20, 120, 20):
+        _ = test(
+            package="mmdet",
+            config=os.path.join(DEFAULT_CACHE_DIR, model_cfg + ".py"),
+            checkpoint=os.path.join(DEFAULT_CACHE_DIR, checkpoint_name),
+            gpus=2,
+            launcher="pytorch",
+            other_args=(
+                "--eval",
+                "bbox",
+                "--work-dir",
+                f"{out_dir}",
+                "--cfg-options",
+                f"data.test.type={dataset}",
+                *data_cfg,
+                f"model.test_cfg.max_per_img={m}",
+                "custom_imports.imports=[src.extensions.dataset.coco_custom]",
+                "custom_imports.allow_failed_imports=False",
+            ),
+        )
 
-        for m in range(20, 120, 20):  # range(20, 120, 20):
-            _ = test(
-                package="mmdet",
-                config=os.path.join(DEFAULT_CACHE_DIR, model_cfg + ".py"),
-                checkpoint=os.path.join(DEFAULT_CACHE_DIR, checkpoint_name),
-                gpus=2,
-                launcher="pytorch",
-                other_args=(
-                    "--eval",
-                    "bbox",
-                    "--work-dir",
-                    f"{out_dir}",
-                    "--cfg-options",
-                    f"data.test.type={dataset}",
-                    # "data.test.ann_file=data/coco/annotations/instances_val2017_subset.json",  # to run evaluation on a small subset
-                    f"model.test_cfg.max_per_img={m}",
-                    "custom_imports.imports=[src.extensions.dataset.coco_custom]",
-                    "custom_imports.allow_failed_imports=False",
-                ),
-            )
+        files = glob.glob(os.path.join(out_dir, "*.json"))
+        latest_file = max(files, key=os.path.getctime)
+        if neptune_on:
+            run[f"measures/max_per_img={m}"].upload(latest_file)
 
 
 if __name__ == "__main__":

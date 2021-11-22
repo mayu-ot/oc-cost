@@ -10,8 +10,8 @@ import neptune.new as neptune
 import neptune.new.integrations.optuna as optuna_utils
 
 MODEL_CFGS = {
-    # "retinanet_r50_fpn_2x_coco": "RetinaNet",
-    # "faster_rcnn_r50_fpn_2x_coco": "Faster-RCNN",
+    "retinanet_r50_fpn_2x_coco": "RetinaNet",
+    "faster_rcnn_r50_fpn_2x_coco": "Faster-RCNN",
     "yolof_r50_c5_8x8_1x_coco": "YOLOF",
     # "detr_r50_8x2_150e_coco": "DETR",
     "vfnet_r50_fpn_mstrain_2x_coco": "VFNet",
@@ -27,8 +27,11 @@ def cli():
 @click.argument("dataset")
 @click.argument("out_dir", type=click.Path(file_okay=False, dir_okay=True))
 @click.option("--measure", default="mOTC")
+@click.option("--alpha", default=0.5)
+@click.option("--beta", default=0.5)
 @click.option("--eval-options", type=str, multiple=True)
-def hptune(dataset, out_dir, measure, eval_options):
+def hptune(dataset, out_dir, measure, alpha, beta, eval_options):
+    args = locals()
     timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
     out_dir = os.path.join(out_dir, timestamp)
 
@@ -38,7 +41,13 @@ def hptune(dataset, out_dir, measure, eval_options):
     model_infos = get_model_info("mmdet")
 
     if len(eval_options):
-        eval_options = ["--eval-options"] + [x for x in eval_options]
+        eval_options = (
+            ["--eval-options"]
+            + [
+                f"otc_params=[(alpha, {alpha}), (beta, {beta}), (use_dummy, True)]"
+            ]
+            + [x for x in eval_options]
+        )
 
     for model_cfg in MODEL_CFGS.keys():
         run = neptune.init(
@@ -46,6 +55,7 @@ def hptune(dataset, out_dir, measure, eval_options):
             name="tune_hparams",
             tags=["optuna", "hptune", MODEL_CFGS[model_cfg], measure],
         )
+        run["params"] = args
         neptune_callback = optuna_utils.NeptuneCallback(
             run, log_plot_param_importances=False
         )

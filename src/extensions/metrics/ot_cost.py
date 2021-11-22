@@ -99,19 +99,17 @@ def cost_func(x, y, mode: str = "giou", alpha: float = 0.8):
     return alpha * loc_cost + (1 - alpha) * cls_cost
 
 
-def get_cmap(
-    a_result, b_result, alpha=0.8, beta=0.4, mode="giou", use_dummy=True
-):
+def get_cmap(a_result, b_result, alpha=0.8, beta=0.4, mode="giou"):
     """[summary]
 
     Args:
-        a_result ([type]): ground truth bounding boxes.
-        b_result ([type]): predictions
+        a_result ([type]): detections
+        b_result ([type]): detections
         mode (str, optional): [description]. Defaults to "giou".
 
     Returns:
-        dist_a (np.array): (N+1,) array. distribution over ground truth bounding boxes.
-        dist_b (np.array): (M,) array. distribution over predictions.
+        dist_a (np.array): (N+1,) array. distribution over detections.
+        dist_b (np.array): (M,) array. distribution over detections.
         cost_map:
     """
     a_result = add_label(a_result)
@@ -119,23 +117,23 @@ def get_cmap(
     n = len(a_result)
     m = len(b_result)
 
-    cost_map = np.zeros((n + int(use_dummy), m + int(use_dummy)))
+    cost_map = np.zeros((n + 1, m + 1))
 
     metric = lambda x, y: cost_func(x, y, alpha=alpha, mode=mode)
     cost_map[:n, :m] = ot.utils.dist(a_result, b_result, metric)
 
-    dist_a = np.ones(n + int(use_dummy))
-    dist_b = np.ones(m + int(use_dummy))
+    dist_a = np.ones(n + 1)
+    dist_b = np.ones(m + 1)
 
     # cost for dummy demander / supplier
-    if use_dummy:
-        cost_map[-1, :] = beta
-        cost_map[:, -1] = beta
-        dist_a[-1] = m
-        dist_b[-1] = n
+    # if use_dummy:
+    cost_map[-1, :] = beta
+    cost_map[:, -1] = beta
+    dist_a[-1] = m
+    dist_b[-1] = n
 
-    dist_a /= dist_a.sum()
-    dist_b /= dist_b.sum()
+    # dist_a /= dist_a.sum()
+    # dist_b /= dist_b.sum()
 
     return dist_a, dist_b, cost_map
 

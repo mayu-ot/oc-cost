@@ -9,10 +9,9 @@ import click
 import time
 from mmdet.utils.logger import get_root_logger
 
-MODEL_CFGS = {
-    "retinanet_r50_fpn_2x_coco": "RetinaNet",
-    "faster_rcnn_r50_fpn_2x_coco": "Faster-RCNN",
-}
+from src.utils.neptune_utils import load_hparam_neptune
+from data.conf.model_cfg import MODEL_CFGS
+import pdb
 
 
 @click.group()
@@ -41,51 +40,41 @@ def stylize_bars(bars, ax, txt_color="w"):
 @click.argument(
     "out_dir", type=click.Path(exists=True, file_okay=False, dir_okay=True)
 )
-@click.option("--ncols", type=int, default=4)
 def generate_reports(
-    out_dir, ncols, metrics=["bbox_mAP", "bbox_mAP_50", "bbox_mAP_75", "mOTC"]
+    out_dir, measures=["bbox_mAP", "bbox_mAP_50", "bbox_mAP_75", "mOTC"]
 ):
     sns.set_style("white")
     work_dir = out_dir
 
     results = {}
-    for data_type in ["corrupt", "org"]:
+    for data_type in os.listdir(work_dir):
+        if not os.path.isdir(os.path.join(work_dir, data_type)):
+            continue
         for fn in os.listdir(os.path.join(work_dir, data_type)):
             if fn.endswith(".json"):
-                res = json.load(open(os.path.join(work_dir, fn)))
+                res = json.load(open(os.path.join(work_dir, data_type, fn)))
                 cfg_name = os.path.splitext(os.path.basename(res["config"]))[0]
                 model_name = MODEL_CFGS[cfg_name]
-                results[model_name] = (data_type, res)
+                results.setdefault(model_name, {})
+                results[model_name][data_type] = res
 
-    models = []
-    for res in results:
-        cfg_name = os.path.splitext(os.path.basename(res["config"]))[0]
-        models.append(MODEL_CFGS[cfg_name])
+    f, axes = plt.subplots(
+        len(measures),
+        len(results),
+        figsize=(5 * len(results), 5 * len(measures)),
+        sharey=True,
+    )
+    for i, measure in enumerate(measures):
+        axes[i][0].set_ylabel(measure)
 
-    data = {}
-    data["model"] = models
-
-    for metric in metrics:
-        vals = [res["metric"][metric] for res in results]
-        data[metric] = vals
-
-    nrows = len(metrics) // ncols + 1
-    f, axes = plt.subplots(nrows, ncols, figsize=(4 * ncols, 4 * nrows))
-    axes = axes.ravel()
-
-    for i, metric in enumerate(metrics):
-
-        bars = axes[i].bar(
-            np.arange(len(models)),
-            data[metric],
-            width=0.3,
-        )
-        axes[i].set_ylim(0, 1.0)
-        axes[i].set_title(metric)
-        stylize_bars(bars, axes[i], "k")
-
-        axes[i].set_xticks(np.arange(len(models)))
-        axes[i].set_xticklabels(models, rotation=45)
+        for j, (k, res_dict) in enumerate(results.items()):
+            ax = axes[i][j]
+            ax.set_title(k)
+            labels = list(res_dict.keys())
+            scores = [res_dict[l]["metric"][measure] for l in labels]
+            ax.bar(range(len(labels)), scores)
+            ax.set_xticks(range(len(labels)))
+            ax.set_xticklabels(labels, rotation=45)
 
     f.savefig(os.path.join(work_dir, "metric.pdf"), bbox_inches="tight")
 
@@ -93,13 +82,24 @@ def generate_reports(
 @cli.command()
 @click.argument("dataset")
 @click.argument("out_dir", type=click.Path(file_okay=False, dir_okay=True))
-def evaluate(dataset, out_dir):
+@click.option("--use-tuned-hparam", default="")
+@click.option("--alpha", default=0.5)
+@click.option("--beta", default=0.5)
+@click.option("-s", "--run-subset", is_flag=True)
+def evaluate(dataset, out_dir, use_tuned_hparam, alpha, beta, run_subset):
     timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
     out_dir = os.path.join(out_dir, timestamp)
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
+
     log_file = os.path.join(out_dir, "corrupt_map_vs_otc.log")
     logger = get_root_logger(log_file)
     logger.info(f"dataset={dataset}")
     logger.info(f"dataset={out_dir}")
+
+    eval_options = ["--eval-options"] + [
+        f"otc_params=[(alpha, {alpha}), (beta, {beta}), (use_dummy, True)]"
+    ]
 
     for data_type in ["GaussNoise", "ImageCompression", "org"]:
         out_sub_dir = os.path.join(out_dir, data_type)
@@ -124,13 +124,18 @@ def evaluate(dataset, out_dir):
             checkpoint_name = os.path.basename(model_info.weight)
 
             # test hyperparameters
-            hparams = json.load(
-                open(
-                    f"data/processed/tune_hparams_otc/{MODEL_CFGS[model_cfg]}_tune_res.json"
+            hparam_options = ()
+            if len(use_tuned_hparam):
+                hparam_options = load_hparam_neptune(
+                    model_cfg, use_tuned_hparam
                 )
-            )
-            score_thr = hparams["best_params"]["score_thr"]
-            iou_threshold = hparams["best_params"]["iou_threshold"]
+
+            if run_subset:
+                data_cfg = [
+                    "data.test.ann_file=data/coco/annotations/instances_val2017_subset.json"
+                ]
+            else:
+                data_cfg = []
 
             _ = test(
                 package="mmdet",
@@ -146,11 +151,11 @@ def evaluate(dataset, out_dir):
                     "--cfg-options",
                     f"data.test.type={dataset}",
                     f"data.test.img_prefix={img_dir}",
-                    "data.test.ann_file=data/coco/annotations/instances_val2017.json",  # to run evaluation on a small subset
+                    *data_cfg,
                     "custom_imports.imports=[src.extensions.dataset.coco_custom]",
                     "custom_imports.allow_failed_imports=False",
-                    f"model.test_cfg.score_thr={score_thr}",
-                    f"model.test_cfg.nms.iou_threshold={iou_threshold}",
+                    *hparam_options,
+                    *eval_options,
                 ),
             )
 

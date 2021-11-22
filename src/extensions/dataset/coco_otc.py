@@ -138,7 +138,7 @@ class CocoOtcDataset(CocoDataset):
         iou_thrs=None,
         metric_items=None,
         eval_map=True,
-        otc_params=[("alpha", 0.5), ("beta", 0.4), ("use_dummy", True)],
+        otc_params=[("alpha", 0.5), ("beta", 0.4)],
     ):
         """Evaluate predicted bboxes. Override this method for your measure.
 
@@ -246,12 +246,11 @@ class CocoOtcDataset(CocoDataset):
         results,
         alpha=0.8,
         beta=0.4,
-        use_dummy=True,
         get_average=True,
     ):
         gts = self.get_gts()
         cmap_func = lambda x, y: get_cmap(
-            x, y, alpha=alpha, beta=beta, mode="giou", use_dummy=use_dummy
+            x, y, alpha=alpha, beta=beta, mode="giou"
         )
         tic = time.time()
         ot_costs = eval_ot_costs(gts, results, cmap_func)
