@@ -210,7 +210,6 @@ def evaluate(
     neptune_on,
 ):
     args = locals()
-    tags = [f"alpha={alpha}", f"beta={beta}"]
     if neptune_on:
         proj_name = os.environ["NEPTUNE_PROJECT"]
         run = neptune.init(
