@@ -8,10 +8,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import click
 import time
-import neptune.new as neptune
-from neptune.new.types import File
 from data.conf.model_cfg import MODEL_CFGS
-from src.utils.neptune_utils import load_hparam_neptune
+
+try:
+    from src.utils.neptune_utils import load_hparam_neptune
+    import neptune.new as neptune
+    from neptune.new.types import File
+except ImportError:
+    raise ImportWarning("neptune client is not installed")
 
 
 @click.group()
@@ -132,6 +136,7 @@ def evaluate(
     japanese,
     run_subset,
 ):
+
     args = locals()
 
     tags = [f"alpha={alpha}", f"beta={beta}"]
