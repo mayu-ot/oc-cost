@@ -1,0 +1,31 @@
+[tool.poetry]
+name = "eval-detection"
+version = "0.1.0"
+description = ""
+authors = ["mayu-ot <otani_mayu@cyberagent.co.jp>"]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+imageio = "^2.19.1"
+matplotlib = "^3.5.2"
+jupyter-bbox-widget = "^0.4.0"
+jupyterlab-widgets = "^1.1.0"
+notebook = "^6.4.11"
+openmim = "^0.1.5"
+pandas = "1.2.5"
+POT = "^0.8.2"
+prettytable = "^3.3.0"
+pycocotools = "^2.0.4"
+seaborn = "^0.11.2"
+krippendorff = "^0.5.1"
+pytest = "^7.1.2"
+neptune-client = "^0.16.2"
+torch = "^1.11.0"
+torchvision = "^0.12.0"
+black = "21.7b0"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
