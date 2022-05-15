@@ -1,20 +1,8 @@
 from typing import Callable, Sequence, Tuple, Callable, Union
-from jupyter_bbox_widget import bbox
 from mmdet.core.evaluation.bbox_overlaps import bbox_overlaps
 import ot
 import numpy as np
 import numpy.typing as npt
-
-
-def get_bbox_overlaps(
-    bboxes1: npt.ArrayLike, bboxes2: npt.ArrayLike, mode: str = "iou", eps: float = 1e-6
-):
-    if mode == "iou":
-        return bbox_overlaps(bboxes1, bboxes2, eps=eps)
-    elif mode == "giou":
-        return bbox_gious(bboxes1, bboxes2, eps=eps)
-    else:
-        raise RuntimeError("valid mode is iou or giou")
 
 
 def bbox_gious(
@@ -107,7 +95,7 @@ def cost_func(x, y, mode: str = "giou", alpha: float = 0.8):
     Returns:
         float: a unit cost
     """
-    giou_val = get_bbox_overlaps(x[:4][None, :], y[:4][None, :], mode)  # range [-1, 1]
+    giou_val = bbox_gious(x[:4][None, :], y[:4][None, :])  # range [-1, 1]
     loc_cost = 1 - (giou_val + 1) * 0.5  # normalized to [0, 1]
     l_x, l_y = x[-1], y[-1]
     if l_x == l_y:
