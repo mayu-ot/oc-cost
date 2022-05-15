@@ -99,9 +99,7 @@ def generate_reports(
 
 
 @cli.command()
-@click.argument(
-    "out_dir", type=click.Path(exists=True, file_okay=False, dir_okay=True)
-)
+@click.argument("out_dir", type=click.Path(exists=True, file_okay=False, dir_okay=True))
 @click.option("--ncols", type=int, default=4)
 @click.option("--neptune-run-id", type=str, default="")
 def generate_reports_cmd(
@@ -114,28 +112,41 @@ def generate_reports_cmd(
 
 
 @cli.command()
-@click.argument("dataset")
 @click.argument("out_dir", type=click.Path(file_okay=False, dir_okay=True))
+@click.argument("n_gpus", default=1)
 @click.option("--neptune-on", is_flag=True)
 @click.option("--use-tuned-hparam", default="")
 @click.option("--alpha", default=0.5)
 @click.option("--beta", default=0.4)
 @click.option("--show-on", is_flag=True)
 @click.option("--eval-options", type=str, multiple=True)
-@click.option("-j", "--japanese", is_flag=True)
 @click.option("-s", "--run-subset", is_flag=True)
 def evaluate(
-    dataset,
     out_dir,
+    n_gpus,
     neptune_on,
     use_tuned_hparam,
     alpha,
     beta,
     show_on,
     eval_options,
-    japanese,
     run_subset,
 ):
+    """Evaluate OC-cost for detectors.
+
+    Args:
+        out_dir (str): output directory. All result files will be stored in a sub-directory with timestamp (out_dir/%Y%m%d_%H%M%S/).
+        neptune_on (bool): When neptune_on is True, the experiment will be uploaded to the neptune server.
+        use_tuned_hparam (bool): _description_
+        alpha (_type_): _description_
+        beta (_type_): _description_
+        show_on (_type_): _description_
+        eval_options (_type_): _description_
+        run_subset (_type_): _description_
+
+    Raises:
+        RuntimeError: _description_
+    """
 
     args = locals()
 
@@ -186,21 +197,11 @@ def evaluate(
 
     for model_cfg in MODEL_CFGS.keys():
 
-        if not os.path.exists(
-            os.path.join(DEFAULT_CACHE_DIR, model_cfg + ".py")
-        ):
+        if not os.path.exists(os.path.join(DEFAULT_CACHE_DIR, model_cfg + ".py")):
             download("mmdet", [model_cfg])
 
         model_info = model_infos.loc[model_cfg]
         checkpoint_name = os.path.basename(model_info.weight)
-
-        if japanese:
-            ckpt_name, ext = checkpoint_name.split(".")
-            checkpoint_name = f"{ckpt_name}_j.{ext}"
-            if not os.path.exists(
-                os.path.join(DEFAULT_CACHE_DIR, checkpoint_name)
-            ):
-                raise RuntimeError(f"japanese checkpoint is not prepared")
 
         # test hyperparameters
         hparam_options = ()
@@ -208,9 +209,7 @@ def evaluate(
             hparam_options = load_hparam_neptune(model_cfg, use_tuned_hparam)
 
         if len(nptn_cfg):
-            nptn_cfg[
-                -1
-            ] = f"data.test.nptn_metadata_suffix={MODEL_CFGS[model_cfg]}"
+            nptn_cfg[-1] = f"data.test.nptn_metadata_suffix={MODEL_CFGS[model_cfg]}"
 
         out_pkl = f"{os.path.join(out_dir, MODEL_CFGS[model_cfg]+'.pkl')}"
         other_args = [
@@ -221,12 +220,11 @@ def evaluate(
             "--work-dir",
             f"{out_dir}",
             "--cfg-options",
-            f"data.test.type={dataset}",
+            f"data.test.type=CocoOtcDataset",
             *nptn_cfg,
             *data_cfg,  # to run evaluation on a small subset
-            "custom_imports.imports=[src.extensions.dataset.coco_custom, src.utils.matplotlib_settings]"
-            if japanese
-            else "custom_imports.imports=[src.extensions.dataset.coco_custom]",
+            "custom_imports.imports=[src.extensions.dataset.coco_custom, src.utils.matplotlib_settings]",
+            "custom_imports.imports=[src.extensions.dataset.coco_custom]",
             "custom_imports.allow_failed_imports=False",
             *hparam_options,
             *eval_options,
@@ -254,7 +252,7 @@ def evaluate(
                 package="mmdet",
                 config=os.path.join(DEFAULT_CACHE_DIR, model_cfg + ".py"),
                 checkpoint=os.path.join(DEFAULT_CACHE_DIR, checkpoint_name),
-                gpus=2,
+                gpus=n_gpus,
                 launcher="pytorch",
                 other_args=other_args,
             )
