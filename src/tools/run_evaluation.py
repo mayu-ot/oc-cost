@@ -99,7 +99,9 @@ def generate_reports(
 
 
 @cli.command()
-@click.argument("out_dir", type=click.Path(exists=True, file_okay=False, dir_okay=True))
+@click.argument(
+    "out_dir", type=click.Path(exists=True, file_okay=False, dir_okay=True)
+)
 @click.option("--ncols", type=int, default=4)
 @click.option("--neptune-run-id", type=str, default="")
 def generate_reports_cmd(
@@ -183,7 +185,7 @@ def evaluate(
 
     eval_options = (
         ["--eval-options"]
-        + [f"otc_params=[(alpha, {alpha}), (beta, {beta}), (use_dummy, True)]"]
+        + [f"otc_params=[(alpha, {alpha}), (beta, {beta})]"]
         + [x for x in eval_options]
     )
 
@@ -197,7 +199,9 @@ def evaluate(
 
     for model_cfg in MODEL_CFGS.keys():
 
-        if not os.path.exists(os.path.join(DEFAULT_CACHE_DIR, model_cfg + ".py")):
+        if not os.path.exists(
+            os.path.join(DEFAULT_CACHE_DIR, model_cfg + ".py")
+        ):
             download("mmdet", [model_cfg])
 
         model_info = model_infos.loc[model_cfg]
@@ -209,7 +213,9 @@ def evaluate(
             hparam_options = load_hparam_neptune(model_cfg, use_tuned_hparam)
 
         if len(nptn_cfg):
-            nptn_cfg[-1] = f"data.test.nptn_metadata_suffix={MODEL_CFGS[model_cfg]}"
+            nptn_cfg[
+                -1
+            ] = f"data.test.nptn_metadata_suffix={MODEL_CFGS[model_cfg]}"
 
         out_pkl = f"{os.path.join(out_dir, MODEL_CFGS[model_cfg]+'.pkl')}"
         other_args = [
