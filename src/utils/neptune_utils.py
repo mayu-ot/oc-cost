@@ -3,9 +3,19 @@ import neptune.new as neptune
 import os
 from data.conf.model_cfg import HPARAM_RUNS
 import mmcv
+from typing import Tuple
 
 
-def load_hparam_neptune(model_cfg, key):
+def load_hparam_neptune(model_cfg: str, key: str) -> Tuple[str]:
+    """Download hyperparameter settings from neptune
+
+    Args:
+        model_cfg (str): Model config name.
+        key (str): Hyperparameter config name.
+
+    Returns:
+        Tuple[str]: Config strings
+    """
     if model_cfg not in HPARAM_RUNS[key]:
         return []
     run_id = HPARAM_RUNS[key][model_cfg]
