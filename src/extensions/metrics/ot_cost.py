@@ -3,6 +3,7 @@ from mmdet.core.evaluation.bbox_overlaps import bbox_overlaps
 import ot
 import numpy as np
 import numpy.typing as npt
+from scipy.spatial.distance import cdist
 
 
 def bbox_gious(
@@ -134,7 +135,7 @@ def get_cmap(
     cost_map = np.zeros((n + 1, m + 1))
 
     metric = lambda x, y: cost_func(x, y, alpha=alpha, mode=mode)
-    cost_map[:n, :m] = ot.utils.dist(a_result, b_result, metric)
+    cost_map[:n, :m] = cdist(a_result, b_result, metric)
 
     dist_a = np.ones(n + 1)
     dist_b = np.ones(m + 1)
@@ -148,18 +149,26 @@ def get_cmap(
     return dist_a, dist_b, cost_map
 
 
-def postprocess(M: npt.ArrayLike, total_cost: float, log: dict) -> float:
-    G = log["G"]
-    G[-1, -1] = 0
-    G /= G.sum()
-    total_cost = (M * G).sum()
+def postprocess(M: npt.ArrayLike, P: npt.ArrayLike) -> float:
+    """drop dummy to dummy costs, normalize the transportation plan, and return total cost
+
+    Args:
+        M (npt.ArrayLike): correction cost matrix
+        P (npt.ArrayLike)): optimal transportation plan matrix
+
+    Returns:
+        float: _description_
+    """
+    P[-1, -1] = 0
+    P /= P.sum()
+    total_cost = (M * P).sum()
     return total_cost
 
 
 def get_ot_cost(
     a_detection: list,
     b_detection: list,
-    cmap_func: Callable,
+    costmap_func: Callable,
     return_matrix: bool = False,
 ) -> Union[float, Tuple[float, dict]]:
     """[summary]
@@ -168,7 +177,7 @@ def get_ot_cost(
         a_detection (list): list of detection results. a_detection[i] contains bounding boxes for i-th class.
         Each element is numpy array whose shape is N x 5. [[x1, y1, x2, y2, s], ...]
         b_detection (list): ditto
-        cmap_func (callable): a function that takes a_detection and b_detection as input and returns a unit cost matrix
+        costmap_func (callable): a function that takes a_detection and b_detection as input and returns a unit cost matrix
     Returns:
         [float]: optimal transportation cost
     """
@@ -177,14 +186,12 @@ def get_ot_cost(
         if sum(map(len, b_detection)) == 0:
             return 0
 
-    a, b, M = cmap_func(a_detection, b_detection)
-    total_cost, log = ot.emd2(a, b, M, return_matrix=True)
-    total_cost = postprocess(M, total_cost, log)
+    a, b, M = costmap_func(a_detection, b_detection)
+    P = ot.emd(a, b, M)
+    total_cost = postprocess(M, P)
 
     if return_matrix:
-        log["M"] = M
-        log["a"] = a
-        log["b"] = b
+        log = {"M": M, "a": a, "b": b}
         return total_cost, log
     else:
         return total_cost
