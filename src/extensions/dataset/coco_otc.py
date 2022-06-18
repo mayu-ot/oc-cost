@@ -138,12 +138,12 @@ class CocoOtcDataset(CocoDataset):
         iou_thrs=None,
         metric_items=None,
         eval_map=True,
-        otc_params=[("alpha", 0.5), ("beta", 0.4)],
+        otc_params=[("alpha", 0.5), ("beta", 0.6)],
     ):
-        """Evaluate predicted bboxes. Override this method for your measure.
+        """Evaluate predicted bboxes. Overide this method for your measure.
 
         Args:
-            results ([type]): [description]
+            results ([type]): outputs of a detector
             metric (str, optional): [description]. Defaults to "bbox".
             logger ([type], optional): [description]. Defaults to None.
             jsonfile_prefix ([type], optional): [description]. Defaults to None.
@@ -151,6 +151,11 @@ class CocoOtcDataset(CocoDataset):
             proposal_nums (tuple, optional): [description]. Defaults to (100, 300, 1000).
             iou_thrs ([type], optional): [description]. Defaults to None.
             metric_items ([type], optional): [description]. Defaults to None.
+            eval_map (bool): Whether to evaluating mAP
+            otc_params (list): OC-cost parameters.
+                                alpha (lambda in the paper): balancing localization and classification costs.
+                                beta: cost of extra / missing detections.
+                                Defaults to [("alpha", 0.5), ("beta", 0.6)]
 
         Returns:
             dict[str, float]: {metric_name: metric_value}
@@ -234,11 +239,6 @@ class CocoOtcDataset(CocoDataset):
                 f"evaluation/figs/pdfs/{fig_name}/{self.nptn_metadata_suffix}"
             ].upload(f"tmp/{fig_name}.pdf")
 
-        # for src_name, v in fig_src.items():
-        #     nptn_run[
-        #         f"evaluation/figs/src/{src_name}/{self.nptn_metadata_suffix}"
-        #     ] = v
-
         nptn_run.stop()
 
     def eval_OTC(
@@ -269,7 +269,6 @@ class CocoOtcDataset(CocoDataset):
     def evaluate_gt(
         self,
         bbox_noise_level=None,
-        cls_noise_level=None,
         **kwargs,
     ):
 
