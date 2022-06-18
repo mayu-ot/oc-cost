@@ -139,6 +139,8 @@ cython_debug/
 
 # my settings
 data/coco
+notebooks/exploratory
+notebooks/reports
 outputs/
 .vscode/
 .dist_test/
