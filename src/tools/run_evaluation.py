@@ -115,11 +115,11 @@ def generate_reports_cmd(
 
 @cli.command()
 @click.argument("out_dir", type=click.Path(file_okay=False, dir_okay=True))
-@click.argument("n_gpus", default=1)
+@click.argument("n_gpus", default=None)
 @click.option("--neptune-on", is_flag=True)
 @click.option("--use-tuned-hparam", default="")
 @click.option("--alpha", default=0.5)
-@click.option("--beta", default=0.4)
+@click.option("--beta", default=0.6)
 @click.option("--show-on", is_flag=True)
 @click.option("--eval-options", type=str, multiple=True)
 @click.option("-s", "--run-subset", is_flag=True)
@@ -139,15 +139,12 @@ def evaluate(
     Args:
         out_dir (str): output directory. All result files will be stored in a sub-directory with timestamp (out_dir/%Y%m%d_%H%M%S/).
         neptune_on (bool): When neptune_on is True, the experiment will be uploaded to the neptune server.
-        use_tuned_hparam (bool): _description_
-        alpha (_type_): _description_
-        beta (_type_): _description_
-        show_on (_type_): _description_
+        use_tuned_hparam (str): download tuned parameters from neptune server. Set values either ["alpha=0.5,beta=0.6", "mAP"]
+        alpha (float): OC-cost parameter. This parameter is called lambda in the paper.
+        beta (float): _description_
+        show_on (flag): write detection result images in output directory
         eval_options (_type_): _description_
-        run_subset (_type_): _description_
-
-    Raises:
-        RuntimeError: _description_
+        run_subset (flag): for test run. The evaluation is done on a small subset of validation set.
     """
 
     args = locals()
