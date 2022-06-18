@@ -23,7 +23,7 @@ You can try OC-cost on a notebook `notebooks/interactive_oc_demo.ipynb`.
 
 ## Data
 
-If you want to test OC-cost on COCO, download [coco2017](https://cocodataset.org/#download) in 'data' folder
+If you want to test OC-cost on COCO, download [coco2017](https://cocodataset.org/#download) in `data` folder
 
 ```
 data
@@ -36,7 +36,7 @@ data
 To evaluate detectors on COCO, run:
 
 ```eval
-python src/tools/run_evaluation.py evaluate outputs/ N_GPUs
+python src/tools/run_evaluation.py evaluate outputs/run_evaluation/ N_GPUs -s --use-tuned-hparam alpha=0.5,beta=0.6
 ```
 
 The scirpt will download detectors from MMDetection and compute mAP and OC-cost on COCO validation 2017.
@@ -55,3 +55,18 @@ OC-cost and mAP of the detectors on MMDetection on COCO validation 2017 are as f
 |VFNet [[config](https://github.com/open-mmlab/mmdetection/blob/master/configs/vfnet/vfnet_r50_fpn_mstrain_2x_coco.py)]   |   0.37     |    0.26     |
 
 NMS parameters are tuned on OC-cost.
+
+## Citation
+
+If this work helps your research, please cite:
+
+```
+@InProceedings{Otani_2022_CVPR,
+    author    = {Otani, Mayu and Togashi, Riku and Nakashima, Yuta and Rahtu, Esa and Heikkil\"a, Janne and Satoh, Shin'ichi},
+    title     = {Optimal Correction Cost for Object Detection Evaluation},
+    booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+    month     = {June},
+    year      = {2022},
+    pages     = {21107-21115}
+}
+```
