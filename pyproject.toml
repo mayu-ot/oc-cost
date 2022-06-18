@@ -2,7 +2,7 @@
 name = "eval-detection"
 version = "0.1.0"
 description = ""
-authors = ["mayu-ot <otani_mayu@cyberagent.co.jp>"]
+authors = ["mayu-ot"]
 
 [tool.poetry.dependencies]
 python = "^3.8"
