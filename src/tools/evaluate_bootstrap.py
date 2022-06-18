@@ -22,7 +22,7 @@ from tabulate import tabulate
 import neptune.new as neptune
 from neptune.new.types import File
 from data.conf.model_cfg import MODEL_CFGS
-from src.utils.neptune_utils import load_hparam_neptune
+from src.utils.neptune_utils import load_hparam_cfg
 from mmdet.datasets import build_dataset, get_loading_pipeline
 from random import choices
 
@@ -247,7 +247,7 @@ def evaluate(
 
         hparam_options = ()
         if len(use_tuned_hparam):
-            hparam_options = load_hparam_neptune(model_cfg, use_tuned_hparam)
+            hparam_options = load_hparam_cfg(model_cfg, use_tuned_hparam)
 
         out_pkl = f"{os.path.join(out_dir, MODEL_CFGS[model_cfg]+'.pkl')}"
 

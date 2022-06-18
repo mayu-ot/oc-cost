@@ -9,9 +9,9 @@ import numpy as np
 import click
 import time
 from data.conf.model_cfg import MODEL_CFGS
+from src.utils.neptune_utils import load_hparam_cfg
 
 try:
-    from src.utils.neptune_utils import load_hparam_neptune
     import neptune.new as neptune
     from neptune.new.types import File
 except ImportError:
@@ -207,7 +207,7 @@ def evaluate(
         # test hyperparameters
         hparam_options = ()
         if len(use_tuned_hparam):
-            hparam_options = load_hparam_neptune(model_cfg, use_tuned_hparam)
+            hparam_options = load_hparam_cfg(model_cfg, use_tuned_hparam)
 
         if len(nptn_cfg):
             nptn_cfg[
