@@ -2,8 +2,13 @@
 
 This repository is the official implementation of [Optimal Correction Cost for Object Detection Evaluation](https://arxiv.org/abs/2203.14438). 
 
-[paper](https://openaccess.thecvf.com/content/CVPR2022/html/Otani_Optimal_Correction_Cost_for_Object_Detection_Evaluation_CVPR_2022_paper.html) | [video](https://www.dropbox.com/s/0ckbxd2odzv2znf/oc-cost_1.mp4?dl=0) | [poster](https://www.dropbox.com/s/w9duuk9q6wsi1do/Poster4.2-233b.pdf?dl=0) |
-[blog (Japanese)](https://cyberagent.ai/blog/research/computervision/16366/) | [日経ロボティクス(Japanese)](https://xtech.nikkei.com/atcl/nxt/mag/rob/18/012600001/00101/) 
+## Links
+- [Paper](https://openaccess.thecvf.com/content/CVPR2022/html/Otani_Optimal_Correction_Cost_for_Object_Detection_Evaluation_CVPR_2022_paper.html)
+- [Video](https://www.dropbox.com/s/0ckbxd2odzv2znf/oc-cost_1.mp4?dl=0)
+- [Poster](https://www.dropbox.com/s/w9duuk9q6wsi1do/Poster4.2-233b.pdf?dl=0)
+- [Blog (Japanese)](https://cyberagent.ai/blog/research/computervision/16366/)
+- [日経ロボティクス(Japanese)](https://xtech.nikkei.com/atcl/nxt/mag/rob/18/012600001/00101/) 
+- A third-party [implementation](https://github.com/Solafune-Inc/OC-cost) by Solafune-Inc.
 
 ## Requirements
 
